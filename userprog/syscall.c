@@ -1,9 +1,9 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
-#include <stdint.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 #include "userprog/process.h"
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
@@ -11,12 +11,6 @@
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
-#include "threads/flags.h"
-#include "threads/init.h"
-#include "threads/interrupt.h"
-#include "threads/palloc.h"
-#include "threads/thread.h"
-#include "threads/vaddr.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -29,69 +23,102 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
-	uint32_t *p = (uint32_t*)f->esp;
-	uint32_t *arg = 0;
-	uint32_t *arg2 = 0;
-	uint32_t *arg3 = 0;
-	if(p !=NULL && is_user_vaddr(p) && p < PHYS_BASE){
-		switch((uint32_t)&p)
-		{
-			case SYS_HALT:
-				 //shutdown_configure (SHUTDOWN_POWER_OFF);
-				break;
-			case SYS_EXEC:
-				arg = (uint32_t)*(p + 1);
-				break;
-			case SYS_WAIT:
-				arg = (uint32_t)*(p + 1);
-				break;
-			case SYS_REMOVE:
-				arg = (uint32_t)*(p + 1);
-				break;
-			case SYS_OPEN:
-				arg = (uint32_t)*(p + 1);
-				break;
-			case SYS_FILESIZE:
-				arg = (uint32_t)*(p + 1);
-				break;
-			case SYS_TELL:
-				arg = (uint32_t)*(p + 1);
-				break;
-			case SYS_CLOSE:
-				arg = (uint32_t)*(p + 1);
-				break;
-			case SYS_EXIT:
-				arg = (uint32_t)*(p + 1);
-				break;
-			case SYS_CREATE:
-				arg = (uint32_t)*(p + 1);
-				arg2 = (uint32_t)*(p + 2);
-				break;
-			case SYS_SEEK:
-				arg = (uint32_t)*(p + 1);
-				arg2 = (uint32_t)*(p + 2);
-				break;
-			
-			case SYS_WRITE:
-				arg = (uint32_t)*(p + 1);
-				arg2 = (uint32_t)*(p + 2);
-				arg3 = (uint32_t)*(p + 3);
-			if(arg3 < PHYS_BASE){
-				f->eax = -1;
-				}
-				break;
-			case SYS_READ:
-				arg = (uint32_t)*(p + 1);
-				arg2 = (uint32_t)*(p + 2);
-				arg3 = (uint32_t)*(p + 3);
-			if(arg3 < PHYS_BASE){
-				f->eax = -1;
-				}
-				break;
-			default:
-				break;
-		}
-	}
+  uint32_t *p = (uint32_t*) f->esp;
+  if(p !=NULL && is_user_vaddr(p) && p < (uint32_t*) PHYS_BASE){
+    switch((uint32_t) *p)
+      {
+      case SYS_HALT:
+        halt();
+	break;
+      case SYS_EXIT:
+        exit((int) *(p + 1));
+	break;
+      case SYS_EXEC:
+	f->eax = exec((char*) *(p + 1));		
+	break;
+      case SYS_WAIT:
+	f->eax = wait((pid_t) *(p + 1));
+	break;
+      case SYS_CREATE:
+	f->eax = create((char*) *(p + 1), (unsigned) *(p + 1));
+	break;
+      case SYS_REMOVE:
+	f->eax = remove((char*) *(p + 1));
+	break;
+      case SYS_OPEN:
+	f->eax = open((char*) *(p + 1));
+	break;
+      case SYS_FILESIZE:
+	f->eax = filesize((int) *(p + 1));
+	break;
+      case SYS_READ:
+	f->eax = read((int) *(p + 1), (void*) *(p + 1), (unsigned) *(p + 1));
+	break;
+      case SYS_WRITE:
+	f->eax = write((int) *(p + 1), (void*) *(p + 1), (unsigned) *(p + 1));
+	break;
+      case SYS_SEEK:
+	seek((int) *(p + 1), (unsigned) *(p + 1));
+	break;
+      case SYS_TELL:
+	f->eax = tell((int) *(p + 1));
+	break;
+      case SYS_CLOSE:
+	close((int) *(p + 1));
+	break;		       
+      default:
+	break;
+      }
+  }
   
   thread_exit ();
 }
+
+void halt(void) {
+}
+
+void exit(int status) {
+}
+
+pid_t exec(const char *cmd_line) {
+  return -1;
+}
+
+int wait(pid_t pid) {
+  return -1;
+}
+
+bool create(const char *file, unsigned initial_size) {
+  return -1;
+}
+
+bool remove(const char *file) {
+  return -1;
+}
+
+int open(const char *file) {
+  return -1;
+}
+
+int filesize(int fd) {
+  return -1;
+}
+
+int read(int fd, void *buffer, unsigned size) {
+  return -1;
+}
+
+int write(int fd, const void *buffer, unsigned size) {
+  return -1;
+}
+
+void seek(int fd, unsigned position) {
+}
+
+unsigned tell(int fd) {
+  return -1;
+}
+
+void close(int fd) {
+}
+
