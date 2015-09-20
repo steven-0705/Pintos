@@ -1,8 +1,22 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include <stdint.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "userprog/process.h"
+#include "userprog/gdt.h"
+#include "userprog/pagedir.h"
+#include "userprog/tss.h"
+#include "filesys/directory.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
+#include "threads/flags.h"
+#include "threads/init.h"
+#include "threads/interrupt.h"
+#include "threads/palloc.h"
+#include "threads/thread.h"
+#include "threads/vaddr.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -15,67 +29,69 @@ syscall_init (void)
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
-	unint32_t *p = f->esp;
-	unint32_t *arg = 0;
-	unint32_t *arg2 = 0;
-	unint32_t *arg3 = 0;
-	if(p !=NULL && is_user_vaddr(p) && p < PHYSBASE){
-		switch(&p)
+	uint32_t *p = (uint32_t*)f->esp;
+	uint32_t *arg = 0;
+	uint32_t *arg2 = 0;
+	uint32_t *arg3 = 0;
+	if(p !=NULL && is_user_vaddr(p) && p < PHYS_BASE){
+		switch((uint32_t)&p)
 		{
 			case SYS_HALT:
-				 shutdown_configure (SHUTDOWN_POWER_OFF);
-		
+				 //shutdown_configure (SHUTDOWN_POWER_OFF);
+				break;
 			case SYS_EXEC:
-				arg = *(p + 1);
+				arg = (uint32_t)*(p + 1);
 				break;
 			case SYS_WAIT:
-				arg = *(p + 1);
+				arg = (uint32_t)*(p + 1);
 				break;
 			case SYS_REMOVE:
-				arg = *(p + 1);
+				arg = (uint32_t)*(p + 1);
 				break;
 			case SYS_OPEN:
-				arg = *(p + 1);
+				arg = (uint32_t)*(p + 1);
 				break;
 			case SYS_FILESIZE:
-				arg = *(p + 1);
+				arg = (uint32_t)*(p + 1);
 				break;
 			case SYS_TELL:
-				arg = *(p + 1);
+				arg = (uint32_t)*(p + 1);
 				break;
 			case SYS_CLOSE:
-				arg = *(p + 1);
+				arg = (uint32_t)*(p + 1);
 				break;
 			case SYS_EXIT:
-				arg = *(p + 1);
+				arg = (uint32_t)*(p + 1);
 				break;
 			case SYS_CREATE:
-				arg = *(p + 1);
-				arg2 = *(p + 2);
+				arg = (uint32_t)*(p + 1);
+				arg2 = (uint32_t)*(p + 2);
 				break;
 			case SYS_SEEK:
-				arg = *(p + 1);
-				arg2 = *(p + 2);
+				arg = (uint32_t)*(p + 1);
+				arg2 = (uint32_t)*(p + 2);
 				break;
 			
 			case SYS_WRITE:
-				arg = *(p + 1);
-				arg2 = *(p + 2);
-				arg3 = *(p + 3);
-			if(arg3 < PHYBASE){
+				arg = (uint32_t)*(p + 1);
+				arg2 = (uint32_t)*(p + 2);
+				arg3 = (uint32_t)*(p + 3);
+			if(arg3 < PHYS_BASE){
+				f->eax = -1;
 				}
 				break;
 			case SYS_READ:
-				arg = *(p + 1);
-				arg2 = *(p + 2);
-				arg3 = *(p + 3);
-			if(arg3 < PHYBASE){
+				arg = (uint32_t)*(p + 1);
+				arg2 = (uint32_t)*(p + 2);
+				arg3 = (uint32_t)*(p + 3);
+			if(arg3 < PHYS_BASE){
+				f->eax = -1;
 				}
 				break;
 			default:
 				break;
 		}
-	
+	}
   
   thread_exit ();
 }
