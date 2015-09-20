@@ -53,13 +53,64 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  char *token, *saveptr;
+  char *argv[MAX_ARGS];
+  int i , argc;
 
+  token = strtok_r(file_name, " ", &saveptr);
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (token, &if_.eip, &if_.esp);
+
+  /* Tokenize the command line arguments */
+  i = 0;
+  while(token != NULL && i != MAX_ARGS) {
+    int allocate = sizeof(char) * (strlen(token) + 1);
+    /* Make sure that the space allocated is divisible
+       `by 4 to make pointer arithmatic easier */
+    while((allocate % 4) != 0) { allocate++; }
+    if_.esp -= allocate;
+    argv[i] = (char*) if_.esp;
+    strlcpy(argv[i], token, strlen(token) + 1);
+    token = strtok_r(NULL, " ", &saveptr);
+    i++;
+  }
+
+  /* Set the number of arguments */
+  argc = i;
+
+  /* Terminate argv with null character */
+  if_.esp -= sizeof(char**);
+  char **terminate = (char**) if_.esp;
+  *terminate = NULL;
+  i--;
+
+  /* Place the pointers for the arguments on the stack */
+  while(i >= 0){
+    if_.esp -= sizeof(char*);
+    char **arg_ptr = (char**) if_.esp;
+    *arg_ptr = argv[i];
+    i--;
+  }
+
+  /* Place argv on the stack */
+  char **argv_start = (char**) if_.esp;
+  if_.esp -= sizeof(char**);;
+  char ***argv_ptr = (char***) if_.esp;
+  *argv_ptr = argv_start;
+
+  /* Place argc on the stack */
+  if_.esp -= sizeof(int);
+  int *argc_ptr = (int*) if_.esp;
+  *argc_ptr = argc;
+
+  /* Place the return address on the stack */
+  if_.esp -= sizeof(int);
+  int *return_ptr = (int*) if_.esp;
+  *return_ptr = 0;
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -88,6 +139,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  while(1) {}
   return -1;
 }
 
