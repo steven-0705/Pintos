@@ -40,7 +40,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 	f->eax = wait((pid_t) *(p + 1));
 	break;
       case SYS_CREATE:
-	f->eax = create((char*) *(p + 1), (unsigned) *(p + 1));
+	f->eax = create((char*) *(p + 1), (unsigned) *(p + 2));
 	break;
       case SYS_REMOVE:
 	f->eax = remove((char*) *(p + 1));
@@ -52,13 +52,13 @@ syscall_handler (struct intr_frame *f UNUSED)
 	f->eax = filesize((int) *(p + 1));
 	break;
       case SYS_READ:
-	f->eax = read((int) *(p + 1), (void*) *(p + 1), (unsigned) *(p + 1));
+	f->eax = read((int) *(p + 1), (void*) *(p + 2), (unsigned) *(p + 3));
 	break;
       case SYS_WRITE:
-	f->eax = write((int) *(p + 1), (void*) *(p + 1), (unsigned) *(p + 1));
+	f->eax = write((int) *(p + 1), (void*) *(p + 2), (unsigned) *(p + 3));
 	break;
       case SYS_SEEK:
-	seek((int) *(p + 1), (unsigned) *(p + 1));
+	seek((int) *(p + 1), (unsigned) *(p + 2));
 	break;
       case SYS_TELL:
 	f->eax = tell((int) *(p + 1));
