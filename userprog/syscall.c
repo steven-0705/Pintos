@@ -13,6 +13,11 @@
 #include "filesys/filesys.h"
 
 static void syscall_handler (struct intr_frame *);
+struct process_file{
+  struct file* file;
+  int fd;
+  struct list_elem elem;
+};
 
 void
 syscall_init (void) 
@@ -74,6 +79,60 @@ syscall_handler (struct intr_frame *f UNUSED)
   thread_exit ();
 }
 
+
+int add_process_file (struct file* file)
+{
+  struct process_file* pFile = malloc(sizeof(struct process_file));
+  pFile->file = file;
+  pFile->fd = thread_current()->fd; 
+  thread_current()->fd++;
+  list_push_back(&thread_current()->fileList,&pFile->elem); /*list.h*/
+  return pFile->fd;
+}
+
+
+struct file* get_process_file(int fd)
+{
+  struct thread* th = thread_current();
+  struct list_elem* elem;
+
+  for(elem = list_begin(&th->fileList); elem!=list_end(&th->fileList);
+    elem = list_next (elem))
+  {
+    struct process_file* pFile = list_entry (elem, struct process_file, elem);
+    if(fd == pFile->fd)
+    {
+      return pFile->file;
+    }
+  }
+
+  return NULL;
+}
+/*if fd = -1 then close all the processes*/
+void close_process_file(int fd)
+{
+  struct thread* th = thread_current();
+  struct list_elem *next, *e = list_begin(&th->fileList);
+  while(e !=list_end(&th->fileList))
+  {
+    next=list_next(e);
+    struct process_file* pf = list_entry(e, struct process_file, elem);
+    if(fd == pf->fd || fd == -1)
+    {
+      file_close(pf->file);
+      list_remove(&pf->elem);
+      free(pf);
+      if(fd!=-1)
+      {
+        return;
+      }
+    }
+    e=next;
+  
+  }
+}
+
+
 void halt(void) {
 }
 
@@ -89,15 +148,23 @@ int wait(pid_t pid) {
 }
 
 bool create(const char *file, unsigned initial_size) {
-  return -1;
+  bool success = filesys_create(file, initial_size);
+  return success;
 }
 
 bool remove(const char *file) {
-  return -1;
+  bool success = filesys_remove(file);
+  return success;
 }
 
 int open(const char *file) {
-  return -1;
+  struct file* sFile = filesys_open(file);
+  if(!sFile) /*maybe say file == null if doesn't work*/
+  { 
+    return -1;
+  }
+  int fd = add_process_file(sFile);
+  return fd;
 }
 
 int filesize(int fd) {
@@ -105,11 +172,38 @@ int filesize(int fd) {
 }
 
 int read(int fd, void *buffer, unsigned size) {
-  return -1;
+  if(fd == 0)
+  {
+    unsigned i;
+    char* input = (char*) buffer;
+    for(i=0; i< size; i++)
+    {
+      /*input[i]=getchar();*/
+    }
+    return size;
+  }
+  struct file* file = get_process_file(fd);
+  if(!file)
+  {
+    return -1;
+  }
+  int bytes = file_read(file, buffer, size); /* check file.h*/
+  return bytes;
 }
 
 int write(int fd, const void *buffer, unsigned size) {
-  return -1;
+  if(fd == 1)
+  {
+    putbuf(buffer,size);
+    return size;
+  }
+  struct file* file = get_process_file(fd);
+  if(!file)
+  {
+    return -1;
+  }
+  int bytes = file_write(file,buffer,size); /*check file.h*/
+  return bytes;
 }
 
 void seek(int fd, unsigned position) {
@@ -120,5 +214,6 @@ unsigned tell(int fd) {
 }
 
 void close(int fd) {
+ close_process_file(fd); 
 }
 
