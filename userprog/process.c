@@ -112,6 +112,7 @@ start_process (void *file_name_)
   int *return_ptr = (int*) if_.esp;
   *return_ptr = 0;
 
+hex_dump(if_.esp, if_.esp , PHYS_BASE - if_.esp, true);
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
