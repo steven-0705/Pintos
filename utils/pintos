@@ -574,6 +574,7 @@ EOF
     print_bochs_disk_line ("ata0-slave", $disks[1]);
     print_bochs_disk_line ("ata1-master", $disks[2]);
     print_bochs_disk_line ("ata1-slave", $disks[3]);
+    print BOCHSRC "display_library:sdl\n";
     if ($vga ne 'terminal') {
 	if ($serial) {
 	    my $mode = defined ($squish_pty) ? "term" : "file";
