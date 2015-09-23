@@ -184,6 +184,11 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
+#ifdef USERPROG
+  struct thread *parent = thread_current();
+  t->parent = parent;
+#endif
+
   /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
      member cannot be observed. */
@@ -383,6 +388,28 @@ thread_get_recent_cpu (void)
   /* Not yet implemented. */
   return 0;
 }
+
+#ifdef USERPROG
+
+/* Function that finds the thread with tid and returns TRUE if that thread
+   is dying. This is how process_wait will check to see if a child is done */
+bool is_thread_dying(tid_t tid) {
+  struct list_elem *elem;
+
+  for(elem = list_begin(&all_list); elem != list_end(&all_list); elem = list_next(elem)) {
+    struct thread *thread = list_entry(elem, struct thread, allelem);
+    if(thread->tid == tid) {
+      if(thread->status == THREAD_DYING) { return true; }
+      else { return false; }
+    }
+  }
+
+  /* Should be impossible to get here, but return that the thread is dying anyways */
+  return true;
+}
+
+#endif
+
 
 /* Idle thread.  Executes when no other thread is ready to run.
 
@@ -469,6 +496,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+#ifdef USERPROG
+  list_init(&t->child_list);
+#endif
   list_push_back (&all_list, &t->allelem);
 }
 

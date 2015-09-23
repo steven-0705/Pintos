@@ -15,6 +15,7 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
@@ -30,6 +31,7 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
+  char *command, *save_ptr;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -38,10 +40,28 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+
+
+  /* Get the command from file_name */
+  command = strtok_r(fn_copy, " ", &save_ptr);
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+  tid = thread_create (command, PRI_DEFAULT, start_process, fn_copy);
+  if (tid == TID_ERROR) {
+    palloc_free_page (fn_copy);
+    struct thread *current = thread_current();
+    current->latest_child_status = FAILED;
+  }
+  else {
+    struct child *child_elem = malloc(sizeof(struct child));
+    if(child_elem == NULL) { PANIC("Failed to allocate memory for the child process"); }
+    
+    child_elem->tid = tid;
+    child_elem->has_exited = false;
+    child_elem->has_waited = false;
+
+    list_push_back(&thread_current()->child_list, &child_elem->elem);
+  }
   return tid;
 }
 
@@ -64,6 +84,16 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (token, &if_.eip, &if_.esp);
+
+  struct thread *current = thread_current();
+  if(current->parent != NULL) {
+    if(success) { current->parent->latest_child_status = SUCCESS; }
+    else { current->parent->latest_child_status = FAILED; }
+  }
+
+  /* If load failed, quit. */
+  if (!success) 
+    thread_exit();
 
   /* Tokenize the command line arguments */
   i = 0;
@@ -112,11 +142,9 @@ start_process (void *file_name_)
   int *return_ptr = (int*) if_.esp;
   *return_ptr = 0;
 
-hex_dump(if_.esp, if_.esp , PHYS_BASE - if_.esp, true);
-  /* If load failed, quit. */
+  hex_dump(if_.esp, if_.esp , PHYS_BASE - if_.esp, true);
+
   palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -138,10 +166,48 @@ hex_dump(if_.esp, if_.esp , PHYS_BASE - if_.esp, true);
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  while(1) {}
-  return -1;
+  /* Check that the child thread was created successfully */
+  if(child_tid != TID_ERROR) {
+    struct thread *parent = thread_current();
+    struct child *child_elem = NULL;
+    struct list_elem *elem = list_head(&parent->child_list);
+   
+    while((elem = list_next(elem)) != list_end(&parent->child_list)) {
+      struct child *next_elem = list_entry(elem, struct child, elem);
+      
+      if(next_elem->tid == child_tid) {
+	child_elem = next_elem;
+	break;
+      }
+    }
+    
+    /* The thread with child_tid is not a direct child of the current thread */
+    if(child_elem == NULL) {
+      return -1;
+    }
+    
+    /* Check if this child has been waited on already */
+    if(child_elem->has_waited) {
+      return -1;
+    }
+
+    /* Wait until the child thread is dying */
+    while(!is_thread_dying(child_tid)) {}
+
+    /* Child was killed by the kernel */
+    if(!child_elem->has_exited) {
+      return -1;
+    }
+
+    /* Child terminated successfully, need to set has_waited and return status of child */
+    child_elem->has_waited = true;
+    return child_elem->status;
+  }
+  else {
+    return TID_ERROR;
+  }
 }
 
 /* Free the current process's resources. */

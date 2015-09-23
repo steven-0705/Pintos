@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -13,6 +14,13 @@ enum thread_status
     THREAD_BLOCKED,     /* Waiting for an event to trigger. */
     THREAD_DYING        /* About to be destroyed. */
   };
+
+/* Status of a thread whenit is being loaded */
+enum load_status {
+  FAILED, /* Failed to load */
+  LOADING, /* Still being loaded */
+  SUCCESS /* Loaded successfully */
+};
 
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
@@ -98,6 +106,13 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
 #endif
 
+    struct thread *parent;              /* Parent thread */
+    struct list child_list;             /* List of children to thread */
+
+    enum load_status latest_child_status;       /* Status of the most recent child */
+    struct lock *child_lock;            /* Lock for child processes  */
+ 
+
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
 
@@ -105,6 +120,14 @@ struct thread
     struct list fileList;
     int fd;
   };
+
+struct child {
+  tid_t tid; /* Child's tid */
+  int status; /* Status of the child */
+  bool has_exited; /* True if child has exited */
+  bool has_waited; /* True if the child has been waited on */
+  struct list_elem elem; /* List element */
+};
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.

@@ -134,6 +134,7 @@ void close_process_file(int fd)
 
 
 void halt(void) {
+  shutdown_power_off();
 }
 
 void exit(int status) {
@@ -144,7 +145,8 @@ pid_t exec(const char *cmd_line) {
 }
 
 int wait(pid_t pid) {
-  return -1;
+  int status = process_wait(pid);
+  return status;
 }
 
 bool create(const char *file, unsigned initial_size) {
@@ -192,7 +194,7 @@ int read(int fd, void *buffer, unsigned size) {
 }
 
 int write(int fd, const void *buffer, unsigned size) {
-  if(fd == 1)
+  if(fd == STDOUT_FILENO)
   {
     putbuf(buffer,size);
     return size;
