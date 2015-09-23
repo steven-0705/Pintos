@@ -141,6 +141,17 @@ void exit(int status) {
 }
 
 pid_t exec(const char *cmd_line) {
+  struct thread *current = thread_current();
+
+  current->latest_child_status = LOADING;
+  tid_t child_tid = process_execute(cmd_line);
+
+  lock_acquire(&current->child_lock);
+  while(current->latest_child_status == LOADING) { cond_wait(&current->child_cond, &current->child_lock); }
+  lock_release(&current->child_lock);
+
+  if(current->latest_child_status == SUCCESS) { return child_tid; }
+  
   return -1;
 }
 

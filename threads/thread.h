@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -104,14 +105,13 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
-#endif
-
     struct thread *parent;              /* Parent thread */
     struct list child_list;             /* List of children to thread */
 
     enum load_status latest_child_status;       /* Status of the most recent child */
-    struct lock *child_lock;            /* Lock for child processes  */
- 
+    struct lock child_lock;            /* Lock for child processes  */
+    struct condition child_cond;       /* Condition for child processes */
+#endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

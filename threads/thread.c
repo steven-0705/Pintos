@@ -184,10 +184,12 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
+  /*  
 #ifdef USERPROG
   struct thread *parent = thread_current();
   t->parent = parent;
 #endif
+  */ 
 
   /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
@@ -499,7 +501,10 @@ init_thread (struct thread *t, const char *name, int priority)
 
 #ifdef USERPROG
   list_init(&t->child_list);
+  lock_init(&t->child_lock);
+  cond_init(&t->child_cond);
 #endif
+
   list_push_back (&all_list, &t->allelem);
 }
 
