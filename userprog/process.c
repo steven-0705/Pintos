@@ -49,8 +49,14 @@ process_execute (const char *file_name)
   tid = thread_create (command, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR) {
     palloc_free_page (fn_copy);
+    
     struct thread *current = thread_current();
     current->latest_child_status = FAILED;
+
+    lock_acquire(&current->child_lock);
+    cond_signal(&current->child_cond, &current->child_lock);
+    lock_release(&current->child_lock);
+    
   }
   else {
     struct child *child_elem = malloc(sizeof(struct child));
@@ -85,11 +91,17 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (token, &if_.eip, &if_.esp);
 
+  
   struct thread *current = thread_current();
   if(current->parent != NULL) {
     if(success) { current->parent->latest_child_status = SUCCESS; }
     else { current->parent->latest_child_status = FAILED; }
+
+    lock_acquire(&current->child_lock);
+    cond_signal(&current->child_cond, &current->child_lock);
+    lock_release(&current->child_lock);
   }
+  
 
   /* If load failed, quit. */
   if (!success) 
@@ -194,7 +206,9 @@ process_wait (tid_t child_tid)
     }
 
     /* Wait until the child thread is dying */
-    while(!is_thread_dying(child_tid)) {}
+    lock_acquire(&parent->child_lock);
+    while(!is_thread_dying(child_tid)) { cond_wait(&parent->child_cond, &parent->child_lock); }
+    lock_release(&parent->child_lock);
 
     /* Child was killed by the kernel */
     if(!child_elem->has_exited) {
