@@ -6,6 +6,7 @@
 typedef int pid_t;
 
 void syscall_init (void);
+bool check_ptr_access(const void *ptr);
 
 void halt(void);
 void exit(int status);

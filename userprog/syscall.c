@@ -23,7 +23,7 @@ syscall_init (void)
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
-bool check_ptr_access(void *ptr) {
+bool check_ptr_access(const void *ptr) {
   struct thread *current = thread_current();
   if(ptr == NULL || !is_user_vaddr(ptr) || pagedir_get_page(current->pagedir, ptr) == NULL) {
     exit(-1);
@@ -35,48 +35,75 @@ bool check_ptr_access(void *ptr) {
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
+  ASSERT(f->esp != NULL);
+
   uint32_t *p = (uint32_t*) f->esp;
-  if(p !=NULL && is_user_vaddr(p) && p < (uint32_t*) PHYS_BASE){
-    switch((uint32_t) *p)
+  if(check_ptr_access(p)){
+    int syscall_number = (int) *p;
+    switch(syscall_number)
       {
       case SYS_HALT:
         halt();
 	break;
       case SYS_EXIT:
-        exit((int) *(p + 1));
+	if(check_ptr_access(p + 1)) {
+	  exit((int) *(p + 1));
+	}
 	break;
       case SYS_EXEC:
-	f->eax = exec((char*) *(p + 1));		
+	if(check_ptr_access(p + 1)) {
+	  f->eax = exec((char*) *(p + 1));
+	}		
 	break;
       case SYS_WAIT:
-	f->eax = wait((pid_t) *(p + 1));
+	if(check_ptr_access(p + 1)) {
+	  f->eax = wait((pid_t) *(p + 1));
+	}
 	break;
       case SYS_CREATE:
-	f->eax = create((char*) *(p + 1), (unsigned) *(p + 2));
+	if(check_ptr_access(p + 1) && check_ptr_access(p + 2)) {
+	  f->eax = create((char*) *(p + 1), (unsigned) *(p + 2));
+	}
 	break;
       case SYS_REMOVE:
-	f->eax = remove((char*) *(p + 1));
+	if(check_ptr_access(p + 1)) {
+	  f->eax = remove((char*) *(p + 1));
+	}
 	break;
       case SYS_OPEN:
-	f->eax = open((char*) *(p + 1));
+	if(check_ptr_access(p + 1)) {
+	  f->eax = open((char*) *(p + 1));
+	}
 	break;
       case SYS_FILESIZE:
-	f->eax = filesize((int) *(p + 1));
+	if(check_ptr_access(p + 1)) {
+	  f->eax = filesize((int) *(p + 1));
+	}
 	break;
       case SYS_READ:
-	f->eax = read((int) *(p + 1), (void*) *(p + 2), (unsigned) *(p + 3));
+	if(check_ptr_access(p + 1) && check_ptr_access(p + 2) && check_ptr_access(p + 3)) {
+	  f->eax = read((int) *(p + 1), (void*) *(p + 2), (unsigned) *(p + 3));
+	}
 	break;
       case SYS_WRITE:
-	f->eax = write((int) *(p + 1), (void*) *(p + 2), (unsigned) *(p + 3));
+	if(check_ptr_access(p + 1) && check_ptr_access(p + 2) && check_ptr_access(p + 3)) {
+	  f->eax = write((int) *(p + 1), (void*) *(p + 2), (unsigned) *(p + 3));
+	}
 	break;
       case SYS_SEEK:
-	seek((int) *(p + 1), (unsigned) *(p + 2));
+	if(check_ptr_access(p + 1) && check_ptr_access(p + 2)) {
+	  seek((int) *(p + 1), (unsigned) *(p + 2));
+	}
 	break;
       case SYS_TELL:
-	f->eax = tell((int) *(p + 1));
+	if(check_ptr_access(p + 1)) {
+	  f->eax = tell((int) *(p + 1));
+	}
 	break;
       case SYS_CLOSE:
-	close((int) *(p + 1));
+	if(check_ptr_access(p + 1)) {
+	  close((int) *(p + 1));
+	}
 	break;		       
       default:
 	break;
@@ -162,24 +189,27 @@ void exit(int status) {
 }
 
 pid_t exec(const char *cmd_line) {
-  struct thread *current = thread_current();
-  tid_t child_tid;
+  if(check_ptr_access((void*) cmd_line)) {
+    struct thread *current = thread_current();
+    tid_t child_tid;
 
-  child_tid = process_execute(cmd_line);
-  current->most_recent_child_status = LOADING;
+    child_tid = process_execute(cmd_line);
+    current->most_recent_child_status = LOADING;
 
-  lock_acquire(&current->child_lock);
-  while(current->most_recent_child_status == LOADING) {
-    cond_wait(&current->child_wait, &current->child_lock);
-  }
-  lock_release(&current->child_lock);
+    lock_acquire(&current->child_lock);
+    while(current->most_recent_child_status == LOADING) {
+      cond_wait(&current->child_wait, &current->child_lock);
+    }
+    lock_release(&current->child_lock);
 
-  if(current->most_recent_child_status == LOAD_SUCCEEDED) {
-    return child_tid;
+    if(current->most_recent_child_status == LOAD_SUCCEEDED) {
+      return child_tid;
+    }
+    else {
+      return -1;
+    }
   }
-  else {
-    return -1;
-  }
+  NOT_REACHED();
 }
 
 int wait(pid_t pid) {
@@ -188,16 +218,24 @@ int wait(pid_t pid) {
 }
 
 bool create(const char *file, unsigned initial_size) {
-  bool success = filesys_create(file, initial_size);
-  return success;
+  if(check_ptr_access((void*) file)) {
+    bool success = filesys_create(file, initial_size);
+    return success;
+  }
+  NOT_REACHED();
 }
 
 bool remove(const char *file) {
-  bool success = filesys_remove(file);
-  return success;
+  if(check_ptr_access((void*) file)) {
+    bool success = filesys_remove(file);
+    return success;
+  }
+  NOT_REACHED();
 }
 
-int open(const char *file UNUSED) {
+int open(const char *file) {
+  if(check_ptr_access((void*) file)) {
+  }
   /*
   struct file* sFile = filesys_open(file);
   if(!sFile)*/ /*maybe say file == null if doesn't work*/ /*
@@ -206,7 +244,7 @@ int open(const char *file UNUSED) {
   }
   int fd = add_process_file(sFile);
   return fd; */
-  return -1;
+  NOT_REACHED();
 }
 							  
 int filesize(int fd UNUSED) {
@@ -214,6 +252,8 @@ int filesize(int fd UNUSED) {
 }
 
 int read(int fd UNUSED, void *buffer UNUSED, unsigned size UNUSED) {
+  if(check_ptr_access(buffer)) {
+  }
   /*
   if(fd == 0)
   {
@@ -232,18 +272,19 @@ int read(int fd UNUSED, void *buffer UNUSED, unsigned size UNUSED) {
   }
   int bytes = file_read(file, buffer, size); *//* check file.h*/
   //return bytes;
-  return -1;
-  }
+  NOT_REACHED();
+}
 
 int write(int fd, const void *buffer, unsigned size) {
-  ASSERT(buffer != NULL);
+  if(check_ptr_access(buffer)) {
 
-  if(fd == 1)
-  {
-    putbuf(buffer,size);
-    return size;
+    if(fd == 1)
+      {
+	putbuf(buffer,size);
+	return size;
+      }
+    else { return -1; }
   }
-  else { return 0; }
   /*
   struct file* file = get_process_file(fd);
   if(!file)
@@ -252,6 +293,7 @@ int write(int fd, const void *buffer, unsigned size) {
   }
   int bytes = file_write(file,buffer,size); *//*check file.h*/
   //return bytes;
+  NOT_REACHED();
 }
 
 void seek(int fd UNUSED, unsigned position UNUSED) {
