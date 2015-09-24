@@ -1,7 +1,9 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/process.h"
@@ -11,18 +13,23 @@
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "devices/shutdown.h"
 
 static void syscall_handler (struct intr_frame *);
-struct process_file{
-  struct file* file;
-  int fd;
-  struct list_elem elem;
-};
 
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+}
+
+bool check_ptr_access(void *ptr) {
+  struct thread *current = thread_current();
+  if(ptr == NULL || !is_user_vaddr(ptr) || pagedir_get_page(current->pagedir, ptr) == NULL) {
+    exit(-1);
+    return false;
+  }
+  return true;
 }
 
 static void
@@ -75,22 +82,20 @@ syscall_handler (struct intr_frame *f UNUSED)
 	break;
       }
   }
-  
-  thread_exit ();
 }
 
-
+/*
 int add_process_file (struct file* file)
 {
   struct process_file* pFile = malloc(sizeof(struct process_file));
   pFile->file = file;
   pFile->fd = thread_current()->fd; 
   thread_current()->fd++;
-  list_push_back(&thread_current()->fileList,&pFile->elem); /*list.h*/
-  return pFile->fd;
-}
+  list_push_back(&thread_current()->fileList,&pFile->elem);*/ /*list.h*/
+/*return pFile->fd;
+  }*/
 
-
+/*
 struct file* get_process_file(int fd)
 {
   struct thread* th = thread_current();
@@ -108,7 +113,8 @@ struct file* get_process_file(int fd)
 
   return NULL;
 }
-/*if fd = -1 then close all the processes*/
+*/
+/*if fd = -1 then close all the processes*/ /*
 void close_process_file(int fd)
 {
   struct thread* th = thread_current();
@@ -131,20 +137,54 @@ void close_process_file(int fd)
   
   }
 }
+					    */
 
 
 void halt(void) {
+  shutdown_power_off();
 }
 
 void exit(int status) {
+  struct thread *current = thread_current();
+  struct thread *parent = current->parent;
+  struct child_data *child = get_child(parent, current->tid);
+
+  printf("%s: exit(%d)\n", current->name, status);
+
+  if(child != NULL) {
+    lock_acquire(&parent->child_lock);
+    child->has_exited = true;
+    child->status = status;
+    lock_release(&parent->child_lock);
+  }
+
+  thread_exit();
 }
 
 pid_t exec(const char *cmd_line) {
-  return -1;
+  struct thread *current = thread_current();
+  tid_t child_tid;
+
+  child_tid = process_execute(cmd_line);
+  current->most_recent_child_status = LOADING;
+
+  lock_acquire(&current->child_lock);
+  while(current->most_recent_child_status == LOADING) {
+    cond_wait(&current->child_wait, &current->child_lock);
+  }
+  lock_release(&current->child_lock);
+
+  if(current->most_recent_child_status == LOAD_SUCCEEDED) {
+    return child_tid;
+  }
+  else {
+    return -1;
+  }
 }
 
 int wait(pid_t pid) {
-  return -1;
+  int status = process_wait(pid);
+  return status;
 }
 
 bool create(const char *file, unsigned initial_size) {
@@ -157,29 +197,32 @@ bool remove(const char *file) {
   return success;
 }
 
-int open(const char *file) {
+int open(const char *file UNUSED) {
+  /*
   struct file* sFile = filesys_open(file);
-  if(!sFile) /*maybe say file == null if doesn't work*/
+  if(!sFile)*/ /*maybe say file == null if doesn't work*/ /*
   { 
     return -1;
   }
   int fd = add_process_file(sFile);
-  return fd;
+  return fd; */
+  return -1;
 }
-
-int filesize(int fd) {
+							  
+int filesize(int fd UNUSED) {
   return -1;
 }
 
-int read(int fd, void *buffer, unsigned size) {
+int read(int fd UNUSED, void *buffer UNUSED, unsigned size UNUSED) {
+  /*
   if(fd == 0)
   {
     unsigned i;
-    char* input = (char*) buffer;
+    //char* input = (char*) buffer;
     for(i=0; i< size; i++)
-    {
+    { */
       /*input[i]=getchar();*/
-    }
+/*}
     return size;
   }
   struct file* file = get_process_file(fd);
@@ -187,33 +230,38 @@ int read(int fd, void *buffer, unsigned size) {
   {
     return -1;
   }
-  int bytes = file_read(file, buffer, size); /* check file.h*/
-  return bytes;
-}
+  int bytes = file_read(file, buffer, size); *//* check file.h*/
+  //return bytes;
+  return -1;
+  }
 
 int write(int fd, const void *buffer, unsigned size) {
+  ASSERT(buffer != NULL);
+
   if(fd == 1)
   {
     putbuf(buffer,size);
     return size;
   }
+  else { return 0; }
+  /*
   struct file* file = get_process_file(fd);
   if(!file)
   {
     return -1;
   }
-  int bytes = file_write(file,buffer,size); /*check file.h*/
-  return bytes;
+  int bytes = file_write(file,buffer,size); *//*check file.h*/
+  //return bytes;
 }
 
-void seek(int fd, unsigned position) {
+void seek(int fd UNUSED, unsigned position UNUSED) {
 }
 
-unsigned tell(int fd) {
+unsigned tell(int fd UNUSED) {
   return -1;
 }
 
-void close(int fd) {
- close_process_file(fd); 
+void close(int fd UNUSED) {
+  //close_process_file(fd); 
 }
 

@@ -7,6 +7,7 @@
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/switch.h"
 #include "threads/synch.h"
@@ -183,6 +184,13 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+
+#ifdef USERPROG
+
+  struct thread *parent = thread_current();
+  t->parent = parent;
+
+#endif
 
   /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
@@ -383,6 +391,48 @@ thread_get_recent_cpu (void)
   /* Not yet implemented. */
   return 0;
 }
+
+#ifdef USERPROG
+
+bool is_thread_dying(tid_t tid) {
+  struct list_elem *e;
+
+  for (e = list_begin (&all_list); e != list_end (&all_list);
+       e = list_next (e))
+    {
+      struct thread *t = list_entry(e, struct thread, allelem);
+      if(t->tid == tid) {
+	if(t->status != THREAD_DYING) {
+	  return false;
+	}
+	else {
+	  return true;
+	}
+      }
+    }
+
+  return true;
+}
+
+struct child_data *get_child(struct thread *parent, tid_t tid) {
+  struct list_elem *e;
+  struct list children_list = parent->children_list;
+  struct child_data *data;
+
+    for (e = list_begin (&children_list); e != list_end (&children_list);
+       e = list_next (e))
+    {
+      data = list_entry(e, struct child_data, elem);
+      if(data->tid == tid) {
+	return data;
+      }
+    }
+
+    return NULL;
+}
+
+#endif
+
 
 /* Idle thread.  Executes when no other thread is ready to run.
 
@@ -469,6 +519,15 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+#ifdef USERPROG
+
+  list_init(&t->children_list);
+  lock_init(&t->child_lock);
+  cond_init(&t->child_wait);
+
+#endif
+
   list_push_back (&all_list, &t->allelem);
 }
 
