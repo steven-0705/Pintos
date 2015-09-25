@@ -2,10 +2,21 @@
 #define USERPROG_SYSCALL_H
 #include <stdint.h>
 #include <stdbool.h>
+#include "lib/kernel/list.h"
 
 typedef int pid_t;
 
+struct process_file {
+  struct file *file;
+  int fd;
+  struct list_elem elem;
+};
+
 void syscall_init (void);
+bool check_ptr_access(const void *ptr);
+int add_process_file (struct file* file);
+struct file* get_process_file(int fd);
+void close_process_file(int fd);
 
 void halt(void);
 void exit(int status);

@@ -16,11 +16,11 @@ enum thread_status
     THREAD_DYING        /* About to be destroyed. */
   };
 
-/* Status of a thread whenit is being loaded */
+/* Status of a process trying to load */
 enum load_status {
-  FAILED, /* Failed to load */
-  LOADING, /* Still being loaded */
-  SUCCESS /* Loaded successfully */
+  LOADING, /* Process if being loaded */
+  LOAD_FAILED, /* Process failed to load */
+  LOAD_SUCCEEDED /* Process loaded successfully */
 };
 
 /* Thread identifier type.
@@ -105,12 +105,12 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
-    struct thread *parent;              /* Parent thread */
-    struct list child_list;             /* List of children to thread */
-
-    enum load_status latest_child_status;       /* Status of the most recent child */
-    struct lock child_lock;            /* Lock for child processes  */
-    struct condition child_cond;       /* Condition for child processes */
+    struct list children_list;          /* List of children */
+    struct list_elem child_elem;        /* The elem to put in the child list */
+    struct thread *parent;              /* The threads parent */
+    struct lock child_lock;             /* Lock used by child_wait */
+    struct condition child_wait;        /* Condition for when a parent waits for a child */
+    enum load_status most_recent_child_status; /* Load status of the most recent child */
 #endif
 
     /* Owned by thread.c. */
@@ -121,11 +121,11 @@ struct thread
     int fd;
   };
 
-struct child {
-  tid_t tid; /* Child's tid */
-  int status; /* Status of the child */
-  bool has_exited; /* True if child has exited */
-  bool has_waited; /* True if the child has been waited on */
+struct child_data {
+  tid_t tid; /* Thread identifier. */
+  int status; /* The status of the child thread */
+  bool has_waited; /* If the child has been waited on already */
+  bool has_exited; /* If the child had exited */
   struct list_elem elem; /* List element */
 };
 
@@ -152,6 +152,13 @@ const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
+
+#ifdef USERPROG
+
+bool is_thread_dying(tid_t tid);
+struct child_data *get_child(struct thread *parent, tid_t tid);
+
+#endif
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);
