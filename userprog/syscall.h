@@ -17,7 +17,8 @@ bool check_ptr_access(const void *ptr);
 int add_process_file (struct file* file);
 struct file* get_process_file(int fd);
 void close_process_file(int fd);
-
+void lock_filesys(void);
+void release_filesys(void);
 void halt(void);
 void exit(int status);
 pid_t exec(const char *cmd_line);

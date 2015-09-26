@@ -397,8 +397,8 @@ thread_get_recent_cpu (void)
 bool is_thread_dying(tid_t tid) {
   struct list_elem *e;
 
-  for (e = list_begin (&all_list); e != list_end (&all_list);
-       e = list_next (e))
+  for (e = list_begin(&all_list); e != list_end(&all_list);
+       e = list_next(e))
     {
       struct thread *t = list_entry(e, struct thread, allelem);
       if(t->tid == tid) {
@@ -416,11 +416,10 @@ bool is_thread_dying(tid_t tid) {
 
 struct child_data *get_child(struct thread *parent, tid_t tid) {
   struct list_elem *e;
-  struct list children_list = parent->children_list;
   struct child_data *data;
-
-    for (e = list_begin (&children_list); e != list_end (&children_list);
-       e = list_next (e))
+  
+  e = list_tail(&parent->children_list);
+  while((e = list_prev(e)) != list_head(&parent->children_list))
     {
       data = list_entry(e, struct child_data, elem);
       if(data->tid == tid) {
@@ -527,6 +526,9 @@ init_thread (struct thread *t, const char *name, int priority)
   cond_init(&t->child_wait);
 
 #endif
+
+  list_init(&t->fileList);
+  t->fd = 3;
 
   list_push_back (&all_list, &t->allelem);
 }

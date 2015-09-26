@@ -102,7 +102,7 @@ start_process (void *file_name_)
   success = load (file_name[0], &if_.eip, &if_.esp);
 
   /* Need to signal parent if load failed or succeeded */
-  current =thread_current();
+  current = thread_current();
   if(current->parent != NULL) {
     if(success) {
       current->parent->most_recent_child_status = LOAD_SUCCEEDED;
@@ -115,7 +115,14 @@ start_process (void *file_name_)
     cond_signal(&current->parent->child_wait, &current->parent->child_lock);
     lock_release(&current->parent->child_lock);
   }
-  
+
+  if (!success) 
+    thread_exit (); 
+
+  struct file *f = filesys_open(file_name[0]);
+  if(f != NULL) {
+    file_deny_write(f);
+  }
 
   /* Tokenize the command line arguments */
   i = 0;
@@ -170,9 +177,6 @@ start_process (void *file_name_)
     free(file_name[i]);
   }
   free(file_name);
-
-  if (!success) 
-    thread_exit ();
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
