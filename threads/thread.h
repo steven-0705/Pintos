@@ -111,6 +111,7 @@ struct thread
     struct lock child_lock;             /* Lock used by child_wait */
     struct condition child_wait;        /* Condition for when a parent waits for a child */
     enum load_status most_recent_child_status; /* Load status of the most recent child */
+    struct file *executable;            /* The executable for the thread */
 #endif
 
     /* Owned by thread.c. */

@@ -148,6 +148,7 @@ struct file* get_process_file(int fd)
   while((elem = list_prev(elem)) != list_head(&th->fileList))
   {
     struct process_file* pFile = list_entry (elem, struct process_file, elem);
+
     if(fd == pFile->fd)
     {
       return pFile->file;
@@ -209,9 +210,7 @@ void exit(int status) {
   {
     next=list_next(e);
     struct process_file* pf = list_entry(e, struct process_file, elem);
-    file_close(pf->file);
-    list_remove(&pf->elem);
-    free(pf);
+    close(pf->fd);
     e = next;
   }
 

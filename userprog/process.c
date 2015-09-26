@@ -121,6 +121,7 @@ start_process (void *file_name_)
 
   struct file *f = filesys_open(file_name[0]);
   if(f != NULL) {
+    current->executable = f;
     file_deny_write(f);
   }
 
@@ -262,6 +263,10 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  if(cur->executable != NULL) {
+    file_close(cur->executable);
+  }
 
   /* Remove and free the child threads */
   struct list_elem *e;
