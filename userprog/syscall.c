@@ -10,11 +10,14 @@
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "userprog/exception.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "devices/input.h"
 #include "devices/shutdown.h"
+#include "vm/page.h"
+#include "vm/frame.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -37,7 +40,7 @@ bool check_ptr_access(const void *ptr) {
 }
 
 static void
-syscall_handler (struct intr_frame *f UNUSED) 
+syscall_handler (struct intr_frame *f) 
 {
   ASSERT(f != NULL);
   ASSERT(f->esp != NULL);
@@ -87,7 +90,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 	break;
       case SYS_READ:
 	if(check_ptr_access(p + 1) && check_ptr_access(p + 2) && check_ptr_access(p + 3)) {
-	  f->eax = read((int) *(p + 1), (void*) *(p + 2), (unsigned) *(p + 3));
+	  f->eax = read((int) *(p + 1), (void*) *(p + 2), (unsigned) *(p + 3), p);
 	}
 	break;
       case SYS_WRITE:
@@ -294,21 +297,46 @@ int filesize(int fd) {
   return size;
 }
 
-int read(int fd, void *buffer, unsigned size) {
-  if(check_ptr_access(buffer)) {
-    if((buffer + size) < PHYS_BASE) {
-      if(fd == STDIN_FILENO)
-	{
-	  lock_filesys();
-	  unsigned i;
-	  uint8_t *input = (uint8_t*) buffer;
-	  for(i=0; i< size; i++)
-	    { 
-	      input[i]=input_getc();
-	    }
-	  release_filesys();
-	  return size;
-	}
+int read(int fd, void *buffer, unsigned size, uint32_t *stack_ptr) {
+  void *temp_buffer;
+  struct thread *current;
+  struct supp_page *page;
+  void *frame;
+  if(is_user_vaddr(buffer)) {
+    temp_buffer = pg_round_down(buffer);
+    current = thread_current();
+    page = get_supp_page(&current->supp_page_table, temp_buffer);
+
+    /* Check if the stack needs to be expanded */
+    if(page == NULL && (stack_ptr - 32) <= (uint32_t*) buffer) {
+      if(PHYS_BASE - buffer > MAX_SIZE) {
+	exit(-1);
+      }
+
+      if(pagedir_get_page(current->pagedir, temp_buffer) == NULL) {
+	frame = allocate_frame(PAL_USER | PAL_ZERO);
+	pagedir_set_page(current->pagedir, temp_buffer, frame, true);
+      }
+
+      int offset = PGSIZE;
+      while(is_user_vaddr(temp_buffer + offset) && (pagedir_get_page(current->pagedir, temp_buffer + offset)) == NULL) {
+	frame = allocate_frame(PAL_USER | PAL_ZERO);
+	pagedir_set_page(current->pagedir, temp_buffer + offset, frame, true);
+	offset += PGSIZE;
+      }
+    }
+    if(fd == STDIN_FILENO)
+      {
+	lock_filesys();
+	unsigned i;
+	uint8_t *input = (uint8_t*) buffer;
+	for(i=0; i< size; i++)
+	  { 
+	    input[i]=input_getc();
+	  }
+	release_filesys();
+	return size;
+      }
       struct file* file = get_process_file(fd);
       if(!file)
 	{
@@ -318,9 +346,10 @@ int read(int fd, void *buffer, unsigned size) {
       int bytes = file_read(file, buffer, size); /* check file.h*/
       release_filesys();
       return bytes;
-    }
   }
-  NOT_REACHED();
+  else {
+    exit(-1);
+  }
 }
 
 int write(int fd, const void *buffer, unsigned size) {

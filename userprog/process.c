@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <hash.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -18,6 +19,8 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "vm/frame.h"
+#include "vm/page.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -94,6 +97,10 @@ start_process (void *file_name_)
   int i , argc;
   struct thread *current;
 
+  current = thread_current();
+
+  hash_init(&current->supp_page_table, supp_page_table_hash_func, supp_page_table_less_func, NULL);
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -102,7 +109,6 @@ start_process (void *file_name_)
   success = load (file_name[0], &if_.eip, &if_.esp);
 
   /* Need to signal parent if load failed or succeeded */
-  current = thread_current();
   if(current->parent != NULL) {
     if(success) {
       current->parent->most_recent_child_status = LOAD_SUCCEEDED;
@@ -189,6 +195,27 @@ start_process (void *file_name_)
   NOT_REACHED ();
 }
 
+#ifdef VM
+
+/* Hash function for supplemental hash table */
+unsigned supp_page_table_hash_func (const struct hash_elem *e, void *aux UNUSED) {
+  struct supp_page *page = hash_entry(e, struct supp_page, elem);
+  return hash_bytes(&page->user_addr, sizeof(page->user_addr));
+}
+
+/* Comparison function for supplemental hash table */
+bool supp_page_table_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED) {
+  struct supp_page *page_a = hash_entry(a, struct supp_page, elem);
+  struct supp_page *page_b = hash_entry(b, struct supp_page, elem);
+
+  ASSERT(page_a != NULL);
+  ASSERT(page_b != NULL);
+
+  return (page_a->user_addr - page_b->user_addr) < 0;
+}
+
+#endif
+
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a
@@ -262,7 +289,10 @@ process_exit (void)
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
+      free_frames(cur);
     }
+
+  free_supp_pages(&cur->supp_page_table);
 
   if(cur->executable != NULL) {
     file_close(cur->executable);
@@ -571,26 +601,43 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
+      
+#ifdef VM
+      /* Lazy loading */
+      
+      struct supp_page *page;
+      struct thread *current = thread_current();
+      page = create_supp_page(file, upage, ofs, zero_bytes, read_bytes, writable);
+      
+      if(!add_supp_page(&current->supp_page_table, page)) {
+	return false;
+      }
+
+      ofs += page_read_bytes;     
+#else
       /* Get a page of memory. */
+      
       uint8_t *kpage = palloc_get_page (PAL_USER);
       if (kpage == NULL)
         return false;
-
+      
       /* Load this page. */
+      
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
           palloc_free_page (kpage);
           return false; 
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
+      
       /* Add the page to the process's address space. */
+      
       if (!install_page (upage, kpage, writable)) 
         {
           palloc_free_page (kpage);
           return false; 
         }
-
+#endif
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
@@ -607,14 +654,22 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
+#ifdef VM
+  kpage = allocate_frame(PAL_USER | PAL_ZERO);
+#else
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+#endif
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
         *esp = PHYS_BASE;
       else
+#ifdef VM
+	free_frame(kpage);
+#else
         palloc_free_page (kpage);
+#endif
     }
   return success;
 }

@@ -524,6 +524,7 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init(&t->children_list);
   lock_init(&t->child_lock);
   cond_init(&t->child_wait);
+  lock_init(&t->pagedir_lock);
 
 #endif
 

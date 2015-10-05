@@ -1,10 +1,17 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
+#include "filesys/file.h"
 #include "userprog/gdt.h"
 #include "userprog/syscall.h"
+#include "userprog/pagedir.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "threads/malloc.h"
+#include "vm/frame.h"
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -127,6 +134,10 @@ page_fault (struct intr_frame *f)
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
+  uint32_t *stack_ptr = f->esp;
+  struct thread *current;
+  void *frame;
+  struct supp_page *page;
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -148,6 +159,38 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+
+  if(not_present) {
+    current = thread_current();
+    page = get_supp_page(&current->supp_page_table, pg_round_down(fault_addr));
+    if(page != NULL && is_user_vaddr(fault_addr) && !page->has_loaded) {
+      frame = allocate_frame(PAL_USER);
+      lock_filesys();
+      file_seek(page->file, page->offset);
+      if(file_read(page->file, frame, page->read_bytes) != (int) page->read_bytes) {
+	free_frame(frame);
+      }
+      release_filesys();
+      memset(frame + page->read_bytes, 0, page->zero_bytes);
+      lock_acquire(&current->pagedir_lock);
+      if(!pagedir_set_page(current->pagedir, page->user_addr, frame, page->writable)) {
+	free(frame);
+      }
+      lock_release(&current->pagedir_lock);
+      page->has_loaded = true;
+      return;
+    }
+    else if(page == NULL && (stack_ptr - 32) <= (uint32_t*) fault_addr && (PHYS_BASE - fault_addr - PGSIZE) < MAX_SIZE) {
+      frame = allocate_frame(PAL_USER | PAL_ZERO);
+      pagedir_set_page(current->pagedir, pg_round_down(fault_addr), frame, true);
+      return;
+    }
+  }
+
+  if(!user && write && is_user_vaddr(fault_addr)) {
+    exit(-1);
+  }
+  
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to

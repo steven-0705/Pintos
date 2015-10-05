@@ -3,6 +3,7 @@
 
 #include <debug.h>
 #include <list.h>
+#include <hash.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "threads/synch.h"
@@ -113,6 +114,9 @@ struct thread
     enum load_status most_recent_child_status; /* Load status of the most recent child */
     struct file *executable;            /* The executable for the thread */
 #endif
+
+    struct hash supp_page_table; /* Supplemental page table */
+    struct lock pagedir_lock;
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
