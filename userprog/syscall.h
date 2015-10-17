@@ -12,6 +12,12 @@ struct process_file {
   struct list_elem elem;
 };
 
+struct mmap_file{
+	struct supp_page *spte;
+	int mapid;
+	struct list_elem elem;
+};
+
 void syscall_init (void);
 bool check_ptr_access(const void *ptr);
 int add_process_file (struct file* file);

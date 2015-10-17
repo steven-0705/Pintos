@@ -410,3 +410,154 @@ void close(int fd) {
   release_filesys();
 }
 
+bool add_process_mmap(struct supp_page* spte)
+{
+  struct mmap_file* mm = malloc(sizeof(struct mmap_file));
+  if(!mm)
+  {
+    return false;
+  }
+  mm->spte = spte;
+  mm->mapid = thread_current()->mapid;
+  list_push_back(&thread_current()->mmap_list, &mm->elem);
+  return true;
+}
+
+bool add_mmap_to_page_table(struct file* file, int32_t offset, uint8_t* upage, uint32_t read_bytes, uint32_t zero_bytes)
+{
+  struct supp_page* spte = malloc(sizeof(struct supp_page));
+  if(!spte)
+  {
+    return false;
+  }
+
+  spte->file = file;
+  spte->offset =offset;
+  spte->user_addr = upage;
+  spte->read_bytes = read_bytes;
+  spte->zero_bytes = zero_bytes;
+  spte->has_loaded = false;
+  /*spte->type = MMAP;
+  spte->pinned=false;*/
+  spte->writable = true;
+
+  if(!add_process_mmap(spte))
+  {
+    free(spte);
+    return false;
+  }
+
+  /*if(hash_insert(&thread_current()->spt, &spte->elem))
+  {
+    spte->type = HASH_ERROR;
+    return false;
+  }*/
+    return true;
+}
+
+int mmap(int fd, void* addr){
+  struct file* old_file = get_process_file(fd);
+  if(!old_file || !is_user_vaddr(addr) || /*addr < USER_VADDR_BOTTOM ||*/
+    ((uint32_t) addr % PGSIZE) !=0)
+  {
+    return -1;
+  }
+
+  struct file* file = file_reopen(old_file);
+  
+  if(!file || file_length(old_file) == 0)
+  {
+    return -1;
+  }
+  /*adds two things to thread.h and inits in thread.c*/
+  thread_current()->mapid += 1;
+  int32_t offset = 0;
+  uint32_t numBytes = file_length(file);
+  while(numBytes>0)
+  {
+    uint32_t page_read_bytes;
+    if(numBytes<PGSIZE)
+    {
+      page_read_bytes = numBytes;
+    }
+    else
+    {
+      page_read_bytes = PGSIZE;
+    }
+    uint32_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+    if(!add_mmap_to_page_table(file,offset,addr,page_read_bytes,page_zero_bytes))
+    {
+      munmap(thread_current()->mapid);
+      return -1;
+    }
+    numBytes -= page_read_bytes;
+    offset += page_read_bytes;
+    addr += PGSIZE;
+  }
+  return thread_current()->mapid;
+
+}
+
+void remove_process_mmap(int mapping)
+{
+  struct thread* t = thread_current();
+  struct list_elem *next, *e = list_begin(&t->mmap_list);
+  struct file* f = NULL;
+  int close = 0;
+
+  while(e != list_end(&t->mmap_list))
+  {
+    next = list_next(e);
+    struct mmap_file* mmFile = list_entry(e, struct mmap_file, elem);
+    if(mmFile->mapid == mapping || mapping == -1)
+    {
+      /*mmFile->spte->pinned = true;*/
+      if(mmFile->spte->has_loaded)
+      {
+        if(pagedir_is_dirty(t->pagedir, mmFile->spte->user_addr))
+        {
+          /*lock_filesys();*/
+          file_write_at(mmFile->spte->file, mmFile->spte->user_addr,
+            mmFile->spte->read_bytes, mmFile->spte->offset);
+          /*release_filesys();*/
+        }
+        free_frame(pagedir_get_page(t->pagedir,mmFile->spte->user_addr));
+        pagedir_clear_page(t->pagedir,mmFile->spte->user_addr);
+      }
+      /*if(mm->spte->type != HASH?)
+      {
+        hash_delete(&t->spt, &mm->spte->elem);
+      }*/
+      list_remove(&mmFile->elem);
+      if(mmFile->mapid != close)
+      {
+        if(f)
+        {
+          lock_filesys();
+          file_close(f);
+          release_filesys();
+        }
+        close = mmFile->mapid;
+        f=mmFile->spte->file;
+      }
+      free(mmFile->spte);
+      free(mmFile);
+    }
+    e=next;
+  }
+    if(f)
+    {
+      lock_filesys();
+      file_close(f);
+      release_filesys();
+    }
+      
+    
+  }
+
+void munmap(int mapping)
+{
+  remove_process_mmap(mapping);
+}
+

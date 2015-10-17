@@ -124,6 +124,11 @@ struct thread
      /*Used by file system calls*/
     struct list fileList;
     int fd;
+
+    /*memory mapped files*/
+    struct list mmap_list;
+    int mapid;
+    
   };
 
 struct child_data {
