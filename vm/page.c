@@ -15,6 +15,8 @@ struct supp_page* create_supp_page(struct file *file, uint8_t *user_addr, off_t 
   page->read_bytes = read_bytes;
   page->writable = writable;
   page->has_loaded = false;
+  page->is_mapped = false;
+  page->type = FILE;
 
   return page;
 }

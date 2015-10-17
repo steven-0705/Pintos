@@ -1,7 +1,16 @@
 #ifndef VM_PAGE_H
 #define VM_PAGE_H
 #include <hash.h>
+#include <stddef.h>
 #include "filesys/off_t.h"
+
+enum supp_page_type {
+  FILE = 1,
+  SWAP = 2,
+  FILE_SWAP = 3,
+  MMAP = 4,
+  HASH_ERROR = 5
+};
 
 struct supp_page {
   struct file *file;
@@ -11,6 +20,13 @@ struct supp_page {
   uint32_t read_bytes;
   bool writable;
   bool has_loaded;
+  bool is_mapped;
+
+  size_t swap_index;
+  bool swap_writable;
+
+  enum supp_page_type type;
+
   struct hash_elem elem;
 };
 

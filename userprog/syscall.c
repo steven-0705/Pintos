@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include <hash.h>
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/malloc.h"
@@ -112,7 +113,15 @@ syscall_handler (struct intr_frame *f)
 	if(check_ptr_access(p + 1)) {
 	  close((int) *(p + 1));
 	}
-	break;		       
+	break;
+      case SYS_MMAP:
+	if(check_ptr_access(p + 1) && check_ptr_access(p + 2)) {
+	  f->eax = mmap((int) *(p + 1), (void*) *(p + 2));
+	}
+      case SYS_MUNMAP:
+	if(check_ptr_access(p + 1)) {
+	  munmap((int) *(p + 1));
+	}
       default:
 	break;
       }
@@ -140,7 +149,6 @@ int add_process_file (struct file* file)
   list_push_back(&thread_current()->fileList,&pFile->elem); /*list.h*/
   return pFile->fd;
 }
-
 
 struct file* get_process_file(int fd)
 {
@@ -437,21 +445,20 @@ bool add_mmap_to_page_table(struct file* file, int32_t offset, uint8_t* upage, u
   spte->read_bytes = read_bytes;
   spte->zero_bytes = zero_bytes;
   spte->has_loaded = false;
-  /*spte->type = MMAP;
-  spte->pinned=false;*/
+  spte->type = MMAP;
   spte->writable = true;
 
   if(!add_process_mmap(spte))
   {
     free(spte);
     return false;
-  }
+    }
 
-  /*if(hash_insert(&thread_current()->spt, &spte->elem))
+  if(hash_insert(&thread_current()->supp_page_table, &spte->elem))
   {
     spte->type = HASH_ERROR;
     return false;
-  }*/
+  }
     return true;
 }
 
@@ -496,7 +503,6 @@ int mmap(int fd, void* addr){
     addr += PGSIZE;
   }
   return thread_current()->mapid;
-
 }
 
 void remove_process_mmap(int mapping)

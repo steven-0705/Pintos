@@ -38,5 +38,10 @@ int write(int fd, const void *buffer, unsigned size);
 void seek(int fd, unsigned position);
 unsigned tell(int fd);
 void close(int fd);
+int mmap(int fd, void* addr);
+void munmap(int mapping);
+void remove_process_mmap(int mapping);
+bool add_mmap_to_page_table(struct file* file, int32_t offset, uint8_t* upage, uint32_t read_bytes, uint32_t zero_bytes);
+bool add_process_mmap(struct supp_page* spte);
 
 #endif /* userprog/syscall.h */

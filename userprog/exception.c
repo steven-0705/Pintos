@@ -2,6 +2,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
+#include <hash.h>
 #include "filesys/file.h"
 #include "userprog/gdt.h"
 #include "userprog/syscall.h"
@@ -12,6 +13,7 @@
 #include "threads/malloc.h"
 #include "vm/frame.h"
 #include "vm/page.h"
+#include "vm/swap.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -164,23 +166,55 @@ page_fault (struct intr_frame *f)
     current = thread_current();
     page = get_supp_page(&current->supp_page_table, pg_round_down(fault_addr));
     if(page != NULL && is_user_vaddr(fault_addr) && !page->has_loaded) {
-      frame = allocate_frame(PAL_USER);
-      lock_filesys();
-      file_seek(page->file, page->offset);
-      if(file_read(page->file, frame, page->read_bytes) != (int) page->read_bytes) {
-	free_frame(frame);
+      switch(page->type) {
+
+      case FILE:
+      case MMAP:
+	frame = allocate_frame(PAL_USER);
+	lock_filesys();
+	file_seek(page->file, page->offset);
+	if(file_read(page->file, frame, page->read_bytes) != (int) page->read_bytes) {
+	  free_frame(frame);
+	}
+	release_filesys();
+	memset(frame + page->read_bytes, 0, page->zero_bytes);
+	lock_acquire(&current->pagedir_lock);
+	if(!pagedir_set_page(current->pagedir, page->user_addr, frame, page->writable)) {
+	  free(frame);
+	}
+	lock_release(&current->pagedir_lock);
+	page->has_loaded = true;
+	break;
+       
+      case FILE_SWAP:
+      case SWAP:
+	frame = allocate_frame(PAL_USER);
+	
+	lock_acquire(&current->pagedir_lock);
+	if(!pagedir_set_page(current->pagedir, page->user_addr, frame, page->swap_writable)) {
+	  free_frame(frame);
+	}
+	lock_release(&current->pagedir_lock);
+
+	pin_page(frame);
+	swap_in(page->user_addr, page->swap_index);
+	unpin_page(frame);
+
+	if(page->type == SWAP) {
+	  hash_delete(&current->supp_page_table, &page->elem);
+	}
+	else if(page->type == FILE_SWAP) {
+	  page->type = FILE;
+	  page->has_loaded = true;
+	}
+	break;
+	
+      default:
+	break;
       }
-      release_filesys();
-      memset(frame + page->read_bytes, 0, page->zero_bytes);
-      lock_acquire(&current->pagedir_lock);
-      if(!pagedir_set_page(current->pagedir, page->user_addr, frame, page->writable)) {
-	free(frame);
-      }
-      lock_release(&current->pagedir_lock);
-      page->has_loaded = true;
       return;
     }
-    else if(page == NULL && (stack_ptr - 32) <= (uint32_t*) fault_addr && (PHYS_BASE - fault_addr - PGSIZE) < MAX_SIZE) {
+    else if(page == NULL && (stack_ptr - 32) <= (uint32_t*) fault_addr && (PHYS_BASE - fault_addr - PGSIZE) < MAX_SIZE && is_user_vaddr(fault_addr)) {
       frame = allocate_frame(PAL_USER | PAL_ZERO);
       pagedir_set_page(current->pagedir, pg_round_down(fault_addr), frame, true);
       return;
