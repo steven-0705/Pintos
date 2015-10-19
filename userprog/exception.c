@@ -171,6 +171,7 @@ page_fault (struct intr_frame *f)
       case FILE:
       case MMAP:
 	frame = allocate_frame(PAL_USER);
+	pin_page(frame);
 	lock_filesys();
 	file_seek(page->file, page->offset);
 	if(file_read(page->file, frame, page->read_bytes) != (int) page->read_bytes) {
@@ -178,6 +179,7 @@ page_fault (struct intr_frame *f)
 	}
 	release_filesys();
 	memset(frame + page->read_bytes, 0, page->zero_bytes);
+	unpin_page(frame);
 	lock_acquire(&current->pagedir_lock);
 	if(!pagedir_set_page(current->pagedir, page->user_addr, frame, page->writable)) {
 	  free(frame);
