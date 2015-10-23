@@ -607,7 +607,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       
       struct supp_page *page;
       struct thread *current = thread_current();
-      page = create_supp_page(file, upage, ofs, zero_bytes, read_bytes, writable);
+      page = create_supp_page(file, upage, ofs, page_zero_bytes, page_read_bytes, writable);
       
       if(!add_supp_page(&current->supp_page_table, page)) {
 	return false;

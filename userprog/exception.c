@@ -164,23 +164,29 @@ page_fault (struct intr_frame *f)
 
   if(not_present) {
     current = thread_current();
+    if(((stack_ptr - 32) == (uint32_t*) fault_addr ||(stack_ptr - 4) == (uint32_t*) fault_addr || (stack_ptr ) <= (uint32_t*) fault_addr)&& (PHYS_BASE - fault_addr - PGSIZE) < MAX_SIZE ){
+      create_supp_page( NULL,pg_round_down(fault_addr), 0, 0,0, true);
+}
     page = get_supp_page(&current->supp_page_table, pg_round_down(fault_addr));
     if(page != NULL && is_user_vaddr(fault_addr) && !page->has_loaded) {
       switch(page->type) {
 
       case FILE:
       case MMAP:
-	frame = allocate_frame(PAL_USER);
+	frame = allocate_frame(PAL_USER|PAL_ZERO);
 	pin_page(frame);
 	lock_filesys();
 	file_seek(page->file, page->offset);
 	if(file_read(page->file, frame, page->read_bytes) != (int) page->read_bytes) {
-	  free_frame(frame);
+	  //free_frame(frame);
+	}else{
+
+	memset(frame + page->read_bytes, 0, page->zero_bytes);
 	}
 	release_filesys();
-	memset(frame + page->read_bytes, 0, page->zero_bytes);
 	unpin_page(frame);
 	lock_acquire(&current->pagedir_lock);
+        if(pagedir_get_page(current->pagedir, page->user_addr) == NULL)
 	if(!pagedir_set_page(current->pagedir, page->user_addr, frame, page->writable)) {
 	  free(frame);
 	}
