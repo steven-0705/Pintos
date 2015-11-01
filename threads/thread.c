@@ -208,6 +208,9 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
+  old_level = intr_disable();
+  yield_max_priority();
+  intr_set_level(old_level);
 
   return tid;
 }
@@ -245,7 +248,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered(&ready_list, &t->elem, (list_less_func*) &compare_priority, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -315,8 +318,9 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+  if (cur != idle_thread) {
+    list_insert_ordered(&ready_list, &cur->elem, (list_less_func*) &compare_priority, NULL);
+  }
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -343,7 +347,10 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  enum intr_level old_level = intr_disable();
   thread_current ()->priority = new_priority;
+  yield_max_priority();
+  intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
@@ -585,3 +592,38 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+bool compare_priority (const struct list_elem *a,
+			       const struct list_elem *b,
+			       void *aux UNUSED) {
+  struct thread *thread_a = list_entry(a, struct thread, elem);
+  struct thread *thread_b = list_entry(b, struct thread, elem);
+  if(thread_a->priority > thread_b->priority) { return true; }
+  return false;
+}
+
+bool compare_ticks (const struct list_elem *a,
+			       const struct list_elem *b,
+			       void *aux UNUSED) {
+  struct thread *thread_a = list_entry(a, struct thread, elem);
+  struct thread *thread_b = list_entry(b, struct thread, elem);
+  if(thread_a->ticks > thread_b->ticks) { return true; }
+  return false;
+}
+
+void yield_max_priority(void) {
+  if(list_empty(&ready_list)) {
+    return;
+  }
+  struct thread *thread = list_entry(list_front(&ready_list), struct thread, elem);
+  if(intr_context()) {
+    thread_ticks++;
+    if(thread_current()->priority < thread->priority ||
+       (thread_ticks >= TIME_SLICE && thread_current()->priority == thread->priority)) {
+      intr_yield_on_return();
+    }
+  }
+  if(thread_current()->priority < thread->priority) {
+    thread_yield();
+  }
+}

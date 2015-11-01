@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -93,6 +94,9 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
+    /* Used for timer_sleep */
+    int64_t ticks;
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -137,5 +141,13 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+bool compare_priority (const struct list_elem *a,
+		       const struct list_elem *b,
+		       void *aux UNUSED);
+bool compare_ticks (const struct list_elem *a,
+		    const struct list_elem *b,
+		    void *aux UNUSED);
+void yield_max_priority(void);
 
 #endif /* threads/thread.h */
