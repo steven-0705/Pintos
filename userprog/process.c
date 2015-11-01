@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <hash.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -15,12 +14,9 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
-#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "vm/frame.h"
-#include "vm/page.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -34,9 +30,6 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
-  char **args;
-  char *token, *saveptr, *arg;
-  int i;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -45,43 +38,10 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Need to tokenize here so i can pass the command to thread_create */
-  args = calloc(sizeof(char*), MAX_ARGS + 1);
-  i = 0;
-  token = strtok_r(fn_copy, " ", &saveptr);
-  while(token != NULL && i < MAX_ARGS) {
-    arg = calloc(sizeof(char), strlen(token));
-    strlcpy(arg, token, strlen(token) + 1);
-    args[i] = arg;
-    token = strtok_r(NULL, " ", &saveptr);
-    i++;
-  }
-
-  palloc_free_page (fn_copy);
-  
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (args[0], PRI_DEFAULT, start_process, args);
-
-  /* If thread failed to be created, set load status to failed */
-  if (tid == TID_ERROR) {
-    struct thread *current = thread_current();
-
-    current->most_recent_child_status = LOAD_FAILED;
-    lock_acquire(&current->child_lock);
-    cond_signal(&current->child_wait, &current->child_lock);
-    lock_release(&current->child_lock);
-  }
-  else {
-    struct child_data *data;
-    data = malloc(sizeof(struct child_data));
-    if(data != NULL) {
-      data->tid = tid;
-      data->has_exited = false;
-      data->has_waited = false;
- 
-      list_push_back(&thread_current()->children_list, &data->elem);
-    }
-  }
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  if (tid == TID_ERROR)
+    palloc_free_page (fn_copy); 
   return tid;
 }
 
@@ -90,100 +50,21 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
-  char **file_name = (char**) file_name_;
+  char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
-  char *argv[MAX_ARGS];
-  int i , argc;
-  struct thread *current;
-
-  current = thread_current();
-
-  hash_init(&current->supp_page_table, supp_page_table_hash_func, supp_page_table_less_func, NULL);
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name[0], &if_.eip, &if_.esp);
-
-  /* Need to signal parent if load failed or succeeded */
-  if(current->parent != NULL) {
-    if(success) {
-      current->parent->most_recent_child_status = LOAD_SUCCEEDED;
-    }
-    else {
-      current->parent->most_recent_child_status = LOAD_FAILED;
-    }
-
-    lock_acquire(&current->parent->child_lock);
-    cond_signal(&current->parent->child_wait, &current->parent->child_lock);
-    lock_release(&current->parent->child_lock);
-  }
-
-  if (!success) 
-    thread_exit (); 
-
-  struct file *f = filesys_open(file_name[0]);
-  if(f != NULL) {
-    current->executable = f;
-    file_deny_write(f);
-  }
-
-  /* Tokenize the command line arguments */
-  i = 0;
-  while(file_name[i] != NULL && i < MAX_ARGS) {
-    int allocate = sizeof(char) * (strlen(file_name[i]) + 1);
-    /* Make sure that the space allocated is divisible
-       `by 4 to make pointer arithmatic easier */
-    while((allocate % 4) != 0) { allocate++; }
-    if_.esp -= allocate;
-    argv[i] = (char*) if_.esp;
-    strlcpy(argv[i], file_name[i], strlen(file_name[i]) + 1);
-    i++;
-  }
-
-  /* Set the number of arguments */
-  argc = i;
-
-  /* Terminate argv with null character */
-  if_.esp -= sizeof(char**);
-  char **terminate = (char**) if_.esp;
-  *terminate = NULL;
-  i--;
-
-  /* Place the pointers for the arguments on the stack */
-  while(i >= 0){
-    if_.esp -= sizeof(char*);
-    char **arg_ptr = (char**) if_.esp;
-    *arg_ptr = argv[i];
-    i--;
-  }
-
-  /* Place argv on the stack */
-  char **argv_start = (char**) if_.esp;
-  if_.esp -= sizeof(char**);;
-  char ***argv_ptr = (char***) if_.esp;
-  *argv_ptr = argv_start;
-
-  /* Place argc on the stack */
-  if_.esp -= sizeof(int);
-  int *argc_ptr = (int*) if_.esp;
-  *argc_ptr = argc;
-
-  /* Place the return address on the stack */
-  if_.esp -= sizeof(int);
-  int *return_ptr = (int*) if_.esp;
-  *return_ptr = 0;
-
-  //hex_dump(0, PHYS_BASE - 100, 100, true);
+  success = load (file_name, &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
-  for(i = 0; i < MAX_ARGS && file_name[i]; i++) {
-    free(file_name[i]);
-  }
-  free(file_name);
+  palloc_free_page (file_name);
+  if (!success) 
+    thread_exit ();
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -195,27 +76,6 @@ start_process (void *file_name_)
   NOT_REACHED ();
 }
 
-#ifdef VM
-
-/* Hash function for supplemental hash table */
-unsigned supp_page_table_hash_func (const struct hash_elem *e, void *aux UNUSED) {
-  struct supp_page *page = hash_entry(e, struct supp_page, elem);
-  return hash_bytes(&page->user_addr, sizeof(page->user_addr));
-}
-
-/* Comparison function for supplemental hash table */
-bool supp_page_table_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED) {
-  struct supp_page *page_a = hash_entry(a, struct supp_page, elem);
-  struct supp_page *page_b = hash_entry(b, struct supp_page, elem);
-
-  ASSERT(page_a != NULL);
-  ASSERT(page_b != NULL);
-
-  return (page_a->user_addr - page_b->user_addr) < 0;
-}
-
-#endif
-
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a
@@ -226,45 +86,9 @@ bool supp_page_table_less_func (const struct hash_elem *a, const struct hash_ele
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid) 
+process_wait (tid_t child_tid UNUSED) 
 {
-  struct thread *current;
-  struct child_data *child;
-
-  if(child_tid != TID_ERROR) {
-    current = thread_current();
-    child = get_child(current, child_tid);
-
-    /* Child does not exist */
-    if(child == NULL) {
-      return -1;
-    }
-    else {
-      /* Child has already been waited on */
-      if(child->has_waited) {
-	return -1;
-      }
-
-      /* Wait until child process is dying */
-      lock_acquire(&current->child_lock);
-      while(!is_thread_dying(child_tid)) {
-	cond_wait(&current->child_wait, &current->child_lock);
-      }
-      lock_release(&current->child_lock);
-
-      /* Child was killed by something that wasn't exit */
-      if(!child->has_exited) {
-	return -1;
-      }
-      else {
-	child->has_waited = true;
-	return child->status;
-      }
-    }
-  }
-  else {
-    return TID_ERROR;
-  }
+  return -1;
 }
 
 /* Free the current process's resources. */
@@ -289,36 +113,7 @@ process_exit (void)
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
-      free_frames(cur);
     }
-
-  free_supp_pages(&cur->supp_page_table);
-
-  if(cur->executable != NULL) {
-    file_close(cur->executable);
-  }
-
-  /* Remove and free the child threads */
-  struct list_elem *e;
-  struct list_elem *next;
-  struct child_data *data;
-
-  for (e = list_begin (&cur->children_list); e != list_end (&cur->children_list);
-       e = next)
-    {
-      next = list_next(e);
-      data = list_entry(e, struct child_data, elem);
-      list_remove(e);
-      free(data);
-      } 
-
-  /* Signal the parent that the child has exited */
-  struct thread *parent = thread_current()->parent;
-  if(parent != NULL) {
-    lock_acquire(&parent->child_lock);
-    cond_signal(&parent->child_wait, &parent->child_lock);
-    lock_release(&parent->child_lock);
-  }
 }
 
 /* Sets up the CPU for running user code in the current
@@ -601,43 +396,26 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      
-#ifdef VM
-      /* Lazy loading */
-      
-      struct supp_page *page;
-      struct thread *current = thread_current();
-      page = create_supp_page(file, upage, ofs, page_zero_bytes, page_read_bytes, writable);
-      
-      if(!add_supp_page(&current->supp_page_table, page)) {
-	return false;
-      }
-
-      ofs += page_read_bytes;     
-#else
       /* Get a page of memory. */
-      
       uint8_t *kpage = palloc_get_page (PAL_USER);
       if (kpage == NULL)
         return false;
-      
+
       /* Load this page. */
-      
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
           palloc_free_page (kpage);
           return false; 
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
-      
+
       /* Add the page to the process's address space. */
-      
       if (!install_page (upage, kpage, writable)) 
         {
           palloc_free_page (kpage);
           return false; 
         }
-#endif
+
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
@@ -654,22 +432,14 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-#ifdef VM
-  kpage = allocate_frame(PAL_USER | PAL_ZERO);
-#else
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-#endif
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
         *esp = PHYS_BASE;
       else
-#ifdef VM
-	free_frame(kpage);
-#else
         palloc_free_page (kpage);
-#endif
     }
   return success;
 }

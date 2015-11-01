@@ -13,9 +13,6 @@
 #include "devices/block.h"
 #include "filesys/filesys.h"
 #endif
-#ifdef VM
-#include "vm/swap.h"
-#endif
 
 /* Keyboard control register port. */
 #define CONTROL_REG 0x64
@@ -95,10 +92,6 @@ shutdown_power_off (void)
 
 #ifdef FILESYS
   filesys_done ();
-#endif
-
-#ifdef VM
-  destroy_swap_map();
 #endif
 
   print_stats ();
