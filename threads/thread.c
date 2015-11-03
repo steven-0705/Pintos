@@ -607,7 +607,7 @@ bool compare_ticks (const struct list_elem *a,
 			       void *aux UNUSED) {
   struct thread *thread_a = list_entry(a, struct thread, elem);
   struct thread *thread_b = list_entry(b, struct thread, elem);
-  if(thread_a->ticks > thread_b->ticks) { return true; }
+  if(thread_a->ticks < thread_b->ticks) { return true; }
   return false;
 }
 
@@ -622,6 +622,7 @@ void yield_max_priority(void) {
        (thread_ticks >= TIME_SLICE && thread_current()->priority == thread->priority)) {
       intr_yield_on_return();
     }
+   return;
   }
   if(thread_current()->priority < thread->priority) {
     thread_yield();
