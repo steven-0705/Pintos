@@ -97,6 +97,12 @@ struct thread
     /* Used for timer_sleep */
     int64_t ticks;
 
+    /* Used for donation */
+    int init_priority;
+    struct lock *waiting_on_lock;
+    struct list donation_list;
+    struct list_elem donation_elem;
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -149,5 +155,8 @@ bool compare_ticks (const struct list_elem *a,
 		    const struct list_elem *b,
 		    void *aux UNUSED);
 void yield_max_priority(void);
+void boost_priority(void);
+void donate_priority(void);
+void remove_by_lock(struct lock *lock);
 
 #endif /* threads/thread.h */

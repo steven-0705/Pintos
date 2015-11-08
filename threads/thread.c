@@ -59,6 +59,8 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
 
+#define MAX_DONATION_LEVEL 8
+
 static void kernel_thread (thread_func *, void *aux);
 
 static void idle (void *aux UNUSED);
@@ -347,9 +349,17 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  int old_priority;
   enum intr_level old_level = intr_disable();
-  thread_current ()->priority = new_priority;
-  yield_max_priority();
+  old_priority = thread_current()->priority;
+  thread_current ()->init_priority = new_priority;
+  boost_priority();
+  if(old_priority < thread_current()->priority) {
+    donate_priority();
+  }
+  if(old_priority > thread_current()->priority) {
+    yield_max_priority();
+  }
   intr_set_level(old_level);
 }
 
@@ -357,7 +367,11 @@ thread_set_priority (int new_priority)
 int
 thread_get_priority (void) 
 {
-  return thread_current ()->priority;
+  int priority;
+  enum intr_level old_level = intr_disable();
+  priority = thread_current ()->priority;
+  intr_set_level(old_level);
+  return priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -477,6 +491,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
+
+  t->init_priority = priority;
+  t->waiting_on_lock = NULL;
+  list_init(&t->donation_list);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -626,5 +644,46 @@ void yield_max_priority(void) {
   }
   if(thread_current()->priority < thread->priority) {
     thread_yield();
+  }
+}
+
+void boost_priority(void) {
+  struct thread *current = thread_current();
+  struct thread *other;
+
+  current->priority = current->init_priority;
+  if(list_empty(&current->donation_list)) {
+    return;
+  }
+  other = list_entry(list_front(&current->donation_list), struct thread, donation_elem);
+  if(other->priority > current->priority) {
+    current->priority = other->priority;
+  }
+}
+
+void donate_priority(void) {
+  int donation_level = 0;
+  struct thread *current = thread_current();
+  struct lock *lock = current->waiting_on_lock;
+  while(lock && donation_level < MAX_DONATION_LEVEL) {
+    if(!lock->holder) { return; }
+    if(lock->holder->priority >= current->priority) { return; }
+    lock->holder->priority = current->priority;
+    current = lock->holder;
+    lock = current->waiting_on_lock;
+    donation_level++;
+  }
+}
+
+void remove_by_lock(struct lock *lock) {
+  struct list_elem *e, *next;
+  struct thread *thread;
+
+  for(e = list_begin(&thread_current()->donation_list); e != list_end(&thread_current()->donation_list); e = next) {
+    next = list_next(e);
+    thread = list_entry(e, struct thread, donation_elem);
+    if(thread->waiting_on_lock == lock) {
+      list_remove(e);
+    }
   }
 }
