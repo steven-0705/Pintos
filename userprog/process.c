@@ -14,6 +14,7 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
@@ -30,6 +31,9 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
+  char **args;
+  char *token, *saveptr, *arg;
+  int i;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -38,10 +42,43 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  /* Need to tokenize here so i can pass the command to thread_create */
+  args = calloc(sizeof(char*), MAX_ARGS + 1);
+  i = 0;
+  token = strtok_r(fn_copy, " ", &saveptr);
+  while(token != NULL && i < MAX_ARGS) {
+    arg = calloc(sizeof(char), strlen(token));
+    strlcpy(arg, token, strlen(token) + 1);
+    args[i] = arg;
+    token = strtok_r(NULL, " ", &saveptr);
+    i++;
+  }
+
+  palloc_free_page (fn_copy);
+  
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+  tid = thread_create (args[0], PRI_DEFAULT, start_process, args);
+
+  /* If thread failed to be created, set load status to failed */
+  if (tid == TID_ERROR) {
+    struct thread *current = thread_current();
+
+    current->most_recent_child_status = LOAD_FAILED;
+    lock_acquire(&current->child_lock);
+    cond_signal(&current->child_wait, &current->child_lock);
+    lock_release(&current->child_lock);
+  }
+  else {
+    struct child_data *data;
+    data = malloc(sizeof(struct child_data));
+    if(data != NULL) {
+      data->tid = tid;
+      data->has_exited = false;
+      data->has_waited = false;
+ 
+      list_push_back(&thread_current()->children_list, &data->elem);
+    }
+  }
   return tid;
 }
 
@@ -50,21 +87,97 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
-  char *file_name = file_name_;
+  char **file_name = (char**) file_name_;
   struct intr_frame if_;
   bool success;
+  char *argv[MAX_ARGS];
+  int i , argc;
+  struct thread *current;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (file_name[0], &if_.eip, &if_.esp);
+
+  /* Need to signal parent if load failed or succeeded */
+  current = thread_current();
+  if(current->parent != NULL) {
+    if(success) {
+      current->parent->most_recent_child_status = LOAD_SUCCEEDED;
+    }
+    else {
+      current->parent->most_recent_child_status = LOAD_FAILED;
+    }
+
+    lock_acquire(&current->parent->child_lock);
+    cond_signal(&current->parent->child_wait, &current->parent->child_lock);
+    lock_release(&current->parent->child_lock);
+  }
+
+  if (!success) 
+    thread_exit (); 
+
+  struct file *f = filesys_open(file_name[0]);
+  if(f != NULL) {
+    current->executable = f;
+    file_deny_write(f);
+  }
+
+  /* Tokenize the command line arguments */
+  i = 0;
+  while(file_name[i] != NULL && i < MAX_ARGS) {
+    int allocate = sizeof(char) * (strlen(file_name[i]) + 1);
+    /* Make sure that the space allocated is divisible
+       `by 4 to make pointer arithmatic easier */
+    while((allocate % 4) != 0) { allocate++; }
+    if_.esp -= allocate;
+    argv[i] = (char*) if_.esp;
+    strlcpy(argv[i], file_name[i], strlen(file_name[i]) + 1);
+    i++;
+  }
+
+  /* Set the number of arguments */
+  argc = i;
+
+  /* Terminate argv with null character */
+  if_.esp -= sizeof(char**);
+  char **terminate = (char**) if_.esp;
+  *terminate = NULL;
+  i--;
+
+  /* Place the pointers for the arguments on the stack */
+  while(i >= 0){
+    if_.esp -= sizeof(char*);
+    char **arg_ptr = (char**) if_.esp;
+    *arg_ptr = argv[i];
+    i--;
+  }
+
+  /* Place argv on the stack */
+  char **argv_start = (char**) if_.esp;
+  if_.esp -= sizeof(char**);;
+  char ***argv_ptr = (char***) if_.esp;
+  *argv_ptr = argv_start;
+
+  /* Place argc on the stack */
+  if_.esp -= sizeof(int);
+  int *argc_ptr = (int*) if_.esp;
+  *argc_ptr = argc;
+
+  /* Place the return address on the stack */
+  if_.esp -= sizeof(int);
+  int *return_ptr = (int*) if_.esp;
+  *return_ptr = 0;
+
+  //hex_dump(0, PHYS_BASE - 100, 100, true);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  for(i = 0; i < MAX_ARGS && file_name[i]; i++) {
+    free(file_name[i]);
+  }
+  free(file_name);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -86,9 +199,45 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  return -1;
+  struct thread *current;
+  struct child_data *child;
+
+  if(child_tid != TID_ERROR) {
+    current = thread_current();
+    child = get_child(current, child_tid);
+
+    /* Child does not exist */
+    if(child == NULL) {
+      return -1;
+    }
+    else {
+      /* Child has already been waited on */
+      if(child->has_waited) {
+	return -1;
+      }
+
+      /* Wait until child process is dying */
+      lock_acquire(&current->child_lock);
+      while(!is_thread_dying(child_tid)) {
+	cond_wait(&current->child_wait, &current->child_lock);
+      }
+      lock_release(&current->child_lock);
+
+      /* Child was killed by something that wasn't exit */
+      if(!child->has_exited) {
+	return -1;
+      }
+      else {
+	child->has_waited = true;
+	return child->status;
+      }
+    }
+  }
+  else {
+    return TID_ERROR;
+  }
 }
 
 /* Free the current process's resources. */
@@ -114,6 +263,32 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  if(cur->executable != NULL) {
+    file_close(cur->executable);
+  }
+
+  /* Remove and free the child threads */
+  struct list_elem *e;
+  struct list_elem *next;
+  struct child_data *data;
+
+  for (e = list_begin (&cur->children_list); e != list_end (&cur->children_list);
+       e = next)
+    {
+      next = list_next(e);
+      data = list_entry(e, struct child_data, elem);
+      list_remove(e);
+      free(data);
+      } 
+
+  /* Signal the parent that the child has exited */
+  struct thread *parent = thread_current()->parent;
+  if(parent != NULL) {
+    lock_acquire(&parent->child_lock);
+    cond_signal(&parent->child_wait, &parent->child_lock);
+    lock_release(&parent->child_lock);
+  }
 }
 
 /* Sets up the CPU for running user code in the current

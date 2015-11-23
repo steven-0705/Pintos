@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -14,6 +15,13 @@ enum thread_status
     THREAD_BLOCKED,     /* Waiting for an event to trigger. */
     THREAD_DYING        /* About to be destroyed. */
   };
+
+/* Status of a process trying to load */
+enum load_status {
+  LOADING, /* Process if being loaded */
+  LOAD_FAILED, /* Process failed to load */
+  LOAD_SUCCEEDED /* Process loaded successfully */
+};
 
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
@@ -94,23 +102,37 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
-    /* Used for timer_sleep */
-    int64_t ticks;
-
-    /* Used for donation */
-    int init_priority;
-    struct lock *waiting_on_lock;
-    struct list donation_list;
-    struct list_elem donation_elem;
-
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct list children_list;          /* List of children */
+    struct list_elem child_elem;        /* The elem to put in the child list */
+    struct thread *parent;              /* The threads parent */
+    struct lock child_lock;             /* Lock used by child_wait */
+    struct condition child_wait;        /* Condition for when a parent waits for a child */
+    enum load_status most_recent_child_status; /* Load status of the most recent child */
+    struct file *executable;            /* The executable for the thread */
 #endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+
+     /*Used by file system calls*/
+    struct list fileList;
+    int fd;
+
+    /* Used for timer_sleep */
+    int64_t ticks;
+
   };
+
+struct child_data {
+  tid_t tid; /* Thread identifier. */
+  int status; /* The status of the child thread */
+  bool has_waited; /* If the child has been waited on already */
+  bool has_exited; /* If the child had exited */
+  struct list_elem elem; /* List element */
+};
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -136,6 +158,13 @@ const char *thread_name (void);
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
 
+#ifdef USERPROG
+
+bool is_thread_dying(tid_t tid);
+struct child_data *get_child(struct thread *parent, tid_t tid);
+
+#endif
+
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);
 void thread_foreach (thread_action_func *, void *);
@@ -147,16 +176,8 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-
-bool compare_priority (const struct list_elem *a,
-		       const struct list_elem *b,
-		       void *aux UNUSED);
 bool compare_ticks (const struct list_elem *a,
 		    const struct list_elem *b,
 		    void *aux UNUSED);
-void yield_max_priority(void);
-void boost_priority(void);
-void donate_priority(void);
-void remove_by_lock(struct lock *lock);
 
 #endif /* threads/thread.h */

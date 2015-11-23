@@ -93,8 +93,6 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  //int64_t start = timer_ticks ();
-
   ASSERT (intr_get_level () == INTR_ON);
   if(ticks <= 0) {
     return;
@@ -196,7 +194,6 @@ timer_interrupt (struct intr_frame *args UNUSED)
       thread_unblock(thread);
       e =  list_begin(&sleep_list);
     }
-  yield_max_priority();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

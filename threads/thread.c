@@ -7,6 +7,7 @@
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/switch.h"
 #include "threads/synch.h"
@@ -58,8 +59,6 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
-
-#define MAX_DONATION_LEVEL 8
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -186,6 +185,13 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
+#ifdef USERPROG
+
+  struct thread *parent = thread_current();
+  t->parent = parent;
+
+#endif
+
   /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
      member cannot be observed. */
@@ -210,9 +216,6 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
-  old_level = intr_disable();
-  yield_max_priority();
-  intr_set_level(old_level);
 
   return tid;
 }
@@ -250,7 +253,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered(&ready_list, &t->elem, (list_less_func*) &compare_priority, NULL);
+  list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -320,9 +323,8 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) {
-    list_insert_ordered(&ready_list, &cur->elem, (list_less_func*) &compare_priority, NULL);
-  }
+  if (cur != idle_thread) 
+    list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -349,29 +351,14 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  int old_priority;
-  enum intr_level old_level = intr_disable();
-  old_priority = thread_current()->priority;
-  thread_current ()->init_priority = new_priority;
-  boost_priority();
-  if(old_priority < thread_current()->priority) {
-    donate_priority();
-  }
-  if(old_priority > thread_current()->priority) {
-    yield_max_priority();
-  }
-  intr_set_level(old_level);
+  thread_current ()->priority = new_priority;
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
 {
-  int priority;
-  enum intr_level old_level = intr_disable();
-  priority = thread_current ()->priority;
-  intr_set_level(old_level);
-  return priority;
+  return thread_current ()->priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -404,6 +391,47 @@ thread_get_recent_cpu (void)
   /* Not yet implemented. */
   return 0;
 }
+
+#ifdef USERPROG
+
+bool is_thread_dying(tid_t tid) {
+  struct list_elem *e;
+
+  for (e = list_begin(&all_list); e != list_end(&all_list);
+       e = list_next(e))
+    {
+      struct thread *t = list_entry(e, struct thread, allelem);
+      if(t->tid == tid) {
+	if(t->status != THREAD_DYING) {
+	  return false;
+	}
+	else {
+	  return true;
+	}
+      }
+    }
+
+  return true;
+}
+
+struct child_data *get_child(struct thread *parent, tid_t tid) {
+  struct list_elem *e;
+  struct child_data *data;
+  
+  e = list_tail(&parent->children_list);
+  while((e = list_prev(e)) != list_head(&parent->children_list))
+    {
+      data = list_entry(e, struct child_data, elem);
+      if(data->tid == tid) {
+	return data;
+      }
+    }
+
+    return NULL;
+}
+
+#endif
+
 
 /* Idle thread.  Executes when no other thread is ready to run.
 
@@ -490,11 +518,19 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-  list_push_back (&all_list, &t->allelem);
 
-  t->init_priority = priority;
-  t->waiting_on_lock = NULL;
-  list_init(&t->donation_list);
+#ifdef USERPROG
+
+  list_init(&t->children_list);
+  lock_init(&t->child_lock);
+  cond_init(&t->child_wait);
+
+#endif
+
+  list_init(&t->fileList);
+  t->fd = 3;
+
+  list_push_back (&all_list, &t->allelem);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -611,15 +647,6 @@ allocate_tid (void)
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
-bool compare_priority (const struct list_elem *a,
-			       const struct list_elem *b,
-			       void *aux UNUSED) {
-  struct thread *thread_a = list_entry(a, struct thread, elem);
-  struct thread *thread_b = list_entry(b, struct thread, elem);
-  if(thread_a->priority > thread_b->priority) { return true; }
-  return false;
-}
-
 bool compare_ticks (const struct list_elem *a,
 			       const struct list_elem *b,
 			       void *aux UNUSED) {
@@ -627,63 +654,4 @@ bool compare_ticks (const struct list_elem *a,
   struct thread *thread_b = list_entry(b, struct thread, elem);
   if(thread_a->ticks < thread_b->ticks) { return true; }
   return false;
-}
-
-void yield_max_priority(void) {
-  if(list_empty(&ready_list)) {
-    return;
-  }
-  struct thread *thread = list_entry(list_front(&ready_list), struct thread, elem);
-  if(intr_context()) {
-    thread_ticks++;
-    if(thread_current()->priority < thread->priority ||
-       (thread_ticks >= TIME_SLICE && thread_current()->priority == thread->priority)) {
-      intr_yield_on_return();
-    }
-   return;
-  }
-  if(thread_current()->priority < thread->priority) {
-    thread_yield();
-  }
-}
-
-void boost_priority(void) {
-  struct thread *current = thread_current();
-  struct thread *other;
-
-  current->priority = current->init_priority;
-  if(list_empty(&current->donation_list)) {
-    return;
-  }
-  other = list_entry(list_front(&current->donation_list), struct thread, donation_elem);
-  if(other->priority > current->priority) {
-    current->priority = other->priority;
-  }
-}
-
-void donate_priority(void) {
-  int donation_level = 0;
-  struct thread *current = thread_current();
-  struct lock *lock = current->waiting_on_lock;
-  while(lock && donation_level < MAX_DONATION_LEVEL) {
-    if(!lock->holder) { return; }
-    if(lock->holder->priority >= current->priority) { return; }
-    lock->holder->priority = current->priority;
-    current = lock->holder;
-    lock = current->waiting_on_lock;
-    donation_level++;
-  }
-}
-
-void remove_by_lock(struct lock *lock) {
-  struct list_elem *e, *next;
-  struct thread *thread;
-
-  for(e = list_begin(&thread_current()->donation_list); e != list_end(&thread_current()->donation_list); e = next) {
-    next = list_next(e);
-    thread = list_entry(e, struct thread, donation_elem);
-    if(thread->waiting_on_lock == lock) {
-      list_remove(e);
-    }
-  }
 }
