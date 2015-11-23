@@ -45,11 +45,16 @@ filesys_done (void)
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
+
+   /*added isdir for later use with inodes
+     get_filename is also new at the bottom*/
 bool
-filesys_create (const char *name, off_t initial_size) 
+filesys_create (const char *name, off_t initial_size, bool isdir) 
 {
   block_sector_t inode_sector = 0;
   struct dir *dir = dir_open_root ();
+  /*added*/
+  /*char* file_name = get_filename(name);*/
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector)
                   && inode_create (inode_sector, initial_size)
@@ -103,4 +108,20 @@ do_format (void)
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");
+}
+
+char* get_filename(const char* path)
+{
+  char s[strlen(path) +1];
+  memcpy(s,path,strlen(path)+1);
+
+  char *token, *save_ptr, *prev_token = "";
+  for(token = strtok_r(s,"/", &save_ptr); token != NULL;
+      token = strtok_r(NULL, "/",&save_ptr))
+  {
+    prev_token;
+  }
+  char *file_name = malloc(strlen(prev_token)+1);
+  memcpy(file_name,prev_token,strlen(prev_token)+1);
+  return file_name;
 }

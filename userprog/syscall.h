@@ -8,7 +8,9 @@ typedef int pid_t;
 
 struct process_file {
   struct file *file;
+  struct dir *dir;
   int fd;
+  bool isdir;
   struct list_elem elem;
 };
 

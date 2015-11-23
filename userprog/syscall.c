@@ -13,8 +13,10 @@
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "devices/input.h"
 #include "devices/shutdown.h"
+#include "devices/block.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -109,12 +111,85 @@ syscall_handler (struct intr_frame *f UNUSED)
 	if(check_ptr_access(p + 1)) {
 	  close((int) *(p + 1));
 	}
-	break;		       
+	break;
+  case SYS_CHDIR:
+ 
+  break;
+   case SYS_MKDIR:
+ 
+  break;     
+   case SYS_READDIR:
+ 
+  break;     
+   case SYS_ISDIR:
+ 
+  break;     
+   case SYS_INUMBER:
+ 
+  break;           
       default:
 	break;
       }
   }
 }
+
+bool chdir (const char* dir)
+{
+  return false;
+}
+/*shouldn't work*/
+bool mkdir(const char* dir)
+{
+  return filesys_create(dir,0,true);
+}
+
+bool readdir(int fd, char* name)
+{
+  struct process_file *pf = get_process_file(fd);
+  if(!pf)
+  {
+    return false;
+  }
+  if(!pf->isdir)
+  {
+    return false;
+  }
+  if(!dir_readdir(pf->dir, name))
+  {
+    return false;
+  }
+  return true;
+}
+
+bool isdir(int fd)
+{
+  struct process_file *pf = get_process_file(fd);
+  if(!pf)
+  {
+    return -1;
+  }
+  return pf->isdir;
+}
+
+int inumber(int fd)
+{
+  struct process_file *pf = get_process_file(fd);
+  if(!pf)
+  {
+    return -1;
+  }
+  block_sector_t inumber;
+  if(pf->isdir)
+  {
+    inumber = inode_get_inumber(dir_get_inode(pf->dir));
+  }
+  else
+  {
+    inumber = inode_get_inumber(file_get_inode(pf->file));
+  }
+  return inumber;
+}
+
 
 void lock_filesys(void) {
   if(!lock_held_by_current_thread(&filesys_lock)) {
@@ -249,7 +324,7 @@ int wait(pid_t pid) {
 bool create(const char *file, unsigned initial_size) {
   if(check_ptr_access((void*) file)) {
     lock_filesys();
-    bool success = filesys_create(file, initial_size);
+    bool success = filesys_create(file, initial_size, false);
     release_filesys();
     return success;
   }
