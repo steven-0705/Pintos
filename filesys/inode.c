@@ -224,30 +224,11 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       int chunk_size = size < min_left ? size : min_left;
       if (chunk_size <= 0)
         break;
-
-      if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
-        {
-          /* Read full sector directly into caller's buffer. */
-          block_read (fs_device, sector_idx, buffer + bytes_read);
-        }
-      else 
-        {
-          /* Read sector into bounce buffer, then partially copy
-             into caller's buffer. */
-          if (bounce == NULL) 
-            {
-              bounce = malloc (BLOCK_SECTOR_SIZE);
-              if (bounce == NULL)
-                break;
-            }
-          block_read (fs_device, sector_idx, bounce);
-          memcpy (buffer + bytes_read, bounce + sector_ofs, chunk_size);
-        }
-      /*
+      
       struct cache_info *info = get_cache_block(sector_idx, false);
       memcpy(buffer + bytes_read, (uint8_t*) &info->block + sector_ofs, chunk_size);
+      info->is_accessed = true;
       info->readable = false;
-      */
       
       /* Advance. */
       size -= chunk_size;
@@ -290,36 +271,11 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       if (chunk_size <= 0)
         break;
 
-      if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
-        {
-          /* Write full sector directly to disk. */
-          block_write (fs_device, sector_idx, buffer + bytes_written);
-        }
-      else 
-        {
-          /* We need a bounce buffer. */
-          if (bounce == NULL) 
-            {
-              bounce = malloc (BLOCK_SECTOR_SIZE);
-              if (bounce == NULL)
-                break;
-            }
-
-          /* If the sector contains data before or after the chunk
-             we're writing, then we need to read in the sector
-             first.  Otherwise we start with a sector of all zeros. */
-          if (sector_ofs > 0 || chunk_size < sector_left) 
-            block_read (fs_device, sector_idx, bounce);
-          else
-            memset (bounce, 0, BLOCK_SECTOR_SIZE);
-          memcpy (bounce + sector_ofs, buffer + bytes_written, chunk_size);
-          block_write (fs_device, sector_idx, bounce);
-        }
-      /*
       struct cache_info *info = get_cache_block(sector_idx, false);
       memcpy((uint8_t*) &info->block + sector_ofs, buffer + bytes_written, chunk_size);
+      info->is_accessed = true;
+      info->is_dirty = true;
       info->readable = false;
-      */
 
       /* Advance. */
       size -= chunk_size;
