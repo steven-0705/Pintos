@@ -18,14 +18,17 @@ struct cache_info {
   block_sector_t sector;
   bool is_dirty;
   bool is_accessed;
-  bool readable;
+  int open_cnt;
   struct list_elem elem;
 };
 
 void cache_init(void);
-struct cache_info *get_cache_block(block_sector_t sector, bool dirty_bit);
+struct cache_info *get_cache_block(block_sector_t sector);
+struct cache_info *get_or_evict_cache_block(block_sector_t sector, bool dirty_bit);
 struct cache_info *evict_cache_block(block_sector_t sector, bool dirty_bit);
 void cache_write_to_disk(bool halt);
 void cache_write_back(void *aux);
+void create_cache_readahead(block_sector_t sector);
+void cache_readahead(void *aux);
 
 #endif /* filesys/cache.h */

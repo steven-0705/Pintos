@@ -20,12 +20,9 @@
 
 static void syscall_handler (struct intr_frame *);
 
-struct lock filesys_lock;
-
 void
 syscall_init (void) 
 {
-  lock_init(&filesys_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -112,94 +109,34 @@ syscall_handler (struct intr_frame *f UNUSED)
 	  close((int) *(p + 1));
 	}
 	break;
-  case SYS_CHDIR:
- 
-  break;
-   case SYS_MKDIR:
- 
-  break;     
-   case SYS_READDIR:
- 
-  break;     
-   case SYS_ISDIR:
- 
-  break;     
-   case SYS_INUMBER:
- 
-  break;           
+      case SYS_CHDIR:
+	if(check_ptr_access(p + 1)) {
+	  f->eax = chdir((const char *) *(p + 1));
+	}
+	break;
+      case SYS_MKDIR:
+	if(check_ptr_access(p + 1)) {
+	  f->eax = mkdir((const char *) *(p + 1));
+	}
+	break;     
+      case SYS_READDIR:
+	if(check_ptr_access(p + 1) && check_ptr_access(p + 2)) {
+	  f->eax = readdir((int) *(p + 1), (char *) *(p + 2));
+	}
+	break;     
+      case SYS_ISDIR:
+	if(check_ptr_access(p + 1)) {
+	  f->eax = isdir((int) *(p + 1));
+	}
+	break;     
+      case SYS_INUMBER:
+	if(check_ptr_access(p + 1)) {
+	  f->eax = inumber((int) *(p + 1));
+	}
+	break;           
       default:
 	break;
       }
-  }
-}
-
-bool chdir (const char* dir)
-{
-  return false;
-}
-/*shouldn't work*/
-bool mkdir(const char* dir)
-{
-  return filesys_create(dir,0,true);
-}
-
-bool readdir(int fd, char* name)
-{
-  struct process_file *pf = get_process_file(fd);
-  if(!pf)
-  {
-    return false;
-  }
-  if(!pf->isdir)
-  {
-    return false;
-  }
-  if(!dir_readdir(pf->dir, name))
-  {
-    return false;
-  }
-  return true;
-}
-
-bool isdir(int fd)
-{
-  struct process_file *pf = get_process_file(fd);
-  if(!pf)
-  {
-    return -1;
-  }
-  return pf->isdir;
-}
-
-int inumber(int fd)
-{
-  struct process_file *pf = get_process_file(fd);
-  if(!pf)
-  {
-    return -1;
-  }
-  block_sector_t inumber;
-  if(pf->isdir)
-  {
-    inumber = inode_get_inumber(dir_get_inode(pf->dir));
-  }
-  else
-  {
-    inumber = inode_get_inumber(file_get_inode(pf->file));
-  }
-  return inumber;
-}
-
-
-void lock_filesys(void) {
-  if(!lock_held_by_current_thread(&filesys_lock)) {
-    lock_acquire(&filesys_lock);
-  }
-}
-
-void release_filesys(void) {
-  if(lock_held_by_current_thread(&filesys_lock)) {
-    lock_release(&filesys_lock);
   }
 }
 
@@ -207,14 +144,24 @@ int add_process_file (struct file* file)
 {
   struct process_file* pFile = calloc(sizeof(struct process_file), 1);
   pFile->file = file;
+  pFile->is_dir = false;
   pFile->fd = thread_current()->fd; 
   thread_current()->fd++;
   list_push_back(&thread_current()->fileList,&pFile->elem); /*list.h*/
   return pFile->fd;
 }
 
+int add_process_dir(struct dir *dir) {
+  struct process_file *pFile = calloc(sizeof(struct process_file), 1);
+  pFile->dir = dir;
+  pFile->is_dir = true;
+  pFile->fd = thread_current()->fd;
+  thread_current()->fd++;
+  list_push_back(&thread_current()->fileList, &pFile->elem);
+  return pFile->fd;
+}
 
-struct file* get_process_file(int fd)
+struct process_file* get_process_file(int fd)
 {
   struct thread* th = thread_current();
   struct list_elem* elem;
@@ -226,7 +173,7 @@ struct file* get_process_file(int fd)
 
     if(fd == pFile->fd)
     {
-      return pFile->file;
+      return pFile;
     }
   }
 
@@ -242,12 +189,17 @@ void close_process_file(int fd)
   while(e !=list_end(&th->fileList))
   {
     next=list_next(e);
-    struct process_file* pf = list_entry(e, struct process_file, elem);
-    if(fd == pf->fd || fd == -1)
+    struct process_file* pFile = list_entry(e, struct process_file, elem);
+    if(fd == pFile->fd || fd == -1)
     {
-      file_close(pf->file);
-      list_remove(&pf->elem);
-      free(pf);
+      if(pFile->is_dir) {
+	dir_close(pFile->dir);
+      }
+      else {
+	file_close(pFile->file);
+      }
+      list_remove(&pFile->elem);
+      free(pFile);
       if(fd!=-1)
       {
         return;
@@ -323,49 +275,46 @@ int wait(pid_t pid) {
 
 bool create(const char *file, unsigned initial_size) {
   if(check_ptr_access((void*) file)) {
-    lock_filesys();
-    bool success = filesys_create(file, initial_size, false);
-    release_filesys();
-    return success;
+    return filesys_create(file, initial_size, false);
   }
   NOT_REACHED();
 }
 
 bool remove(const char *file) {
   if(check_ptr_access((void*) file)) {
-    lock_filesys();
-    bool success = filesys_remove(file);
-    release_filesys();
-    return success;
+    return filesys_remove(file);
   }
   NOT_REACHED();
 }
 
 int open(const char *file) {
   if(check_ptr_access((void*) file)) {
-    lock_filesys();
     struct file* sFile = filesys_open(file);
     if(!sFile) /*maybe say file == null if doesn't work*/ 
       { 
-	release_filesys();
 	return -1;
       }
-    int fd = add_process_file(sFile);
-    release_filesys();
+    int fd;
+    if(inode_is_dir(file_get_inode(sFile))) {
+      fd = add_process_dir((struct dir *) sFile);
+    }
+    else {
+      fd = add_process_file(sFile);
+    }
     return fd; 
   }
   NOT_REACHED();
 }
 							  
 int filesize(int fd) {
-  lock_filesys();
-  struct file *file = get_process_file(fd);
-  if(!file) {
-    release_filesys();
+  struct process_file *pFile = get_process_file(fd);
+  if(!pFile) {
     return -1;
   }
-  int size = file_length(file);
-  release_filesys();
+  if(pFile->is_dir) {
+    return -1;
+  }
+  int size = file_length(pFile->file);
   return size;
 }
 
@@ -374,24 +323,23 @@ int read(int fd, void *buffer, unsigned size) {
     if((buffer + size) < PHYS_BASE) {
       if(fd == STDIN_FILENO)
 	{
-	  lock_filesys();
 	  unsigned i;
 	  uint8_t *input = (uint8_t*) buffer;
 	  for(i=0; i< size; i++)
 	    { 
 	      input[i]=input_getc();
 	    }
-	  release_filesys();
 	  return size;
 	}
-      struct file* file = get_process_file(fd);
-      if(!file)
+      struct process_file* pFile = get_process_file(fd);
+      if(!pFile)
 	{
-	  release_filesys();
 	  return -1;
 	}
-      int bytes = file_read(file, buffer, size); /* check file.h*/
-      release_filesys();
+      if(pFile->is_dir) {
+	return -1;
+      }
+      int bytes = file_read(pFile->file, buffer, size); /* check file.h*/
       return bytes;
     }
   }
@@ -404,22 +352,21 @@ int write(int fd, const void *buffer, unsigned size) {
   }
   if(check_ptr_access(buffer)) {
     if((buffer + size) < PHYS_BASE) {
-      lock_filesys();
       if(fd == STDOUT_FILENO)
 	{
 	  putbuf(buffer,size);
-	  release_filesys();
 	  return size;
 	}
       else {   
-	struct file* file = get_process_file(fd);
-	if(!file)
+	struct process_file* pFile = get_process_file(fd);
+	if(!pFile)
 	  {
-	    release_filesys();
 	    return -1;
 	  }
-	int bytes = file_write(file,buffer,size); /*check file.h*/
-	release_filesys();
+	if(pFile->is_dir) {
+	  return -1;
+	}
+	int bytes = file_write(pFile->file, buffer, size); /*check file.h*/
 	return bytes; 
       }
     }
@@ -428,31 +375,86 @@ int write(int fd, const void *buffer, unsigned size) {
 }
 
 void seek(int fd, unsigned position) {
-  lock_filesys();
-  struct file *file = get_process_file(fd);
-  if(!file) {
-    release_filesys();
+  struct process_file *pFile = get_process_file(fd);
+  if(!pFile) {
     return;
   }
-  file_seek(file, position);
-  release_filesys();
+  if(pFile->is_dir) {
+    return;
+  }
+  file_seek(pFile->file, position);
 }
 
 unsigned tell(int fd) {
-  lock_filesys();
-  struct file *file = get_process_file(fd);
-  if(!file) {
-    release_filesys();
+  struct process_file *pFile = get_process_file(fd);
+  if(!pFile) {
     return -1;
   }
-  int offset = file_tell(file);
-  release_filesys();
+  if(pFile->is_dir) {
+    return -1;
+  }
+  int offset = file_tell(pFile->file);
   return offset;
 }
 
 void close(int fd) {
-  lock_filesys();
   close_process_file(fd);
-  release_filesys();
+}
+
+bool chdir (const char* dir UNUSED)
+{
+  return filesys_chdir(dir);
+}
+
+bool mkdir(const char* dir)
+{
+  return filesys_create(dir, 0, true);
+}
+
+bool readdir(int fd, char* name)
+{
+  struct process_file *pFile = get_process_file(fd);
+  if(!pFile)
+  {
+    return false;
+  }
+  if(!pFile->is_dir)
+  {
+    return false;
+  }
+  if(!dir_readdir(pFile->dir, name))
+  {
+    return false;
+  }
+  return true;
+}
+
+bool isdir(int fd)
+{
+  struct process_file *pFile = get_process_file(fd);
+  if(!pFile)
+  {
+    return -1;
+  }
+  return pFile->is_dir;
+}
+
+int inumber(int fd)
+{
+  struct process_file *pFile = get_process_file(fd);
+  if(!pFile)
+  {
+    return -1;
+  }
+  block_sector_t inumber;
+  if(pFile->is_dir)
+  {
+    inumber = inode_get_inumber(dir_get_inode(pFile->dir));
+  }
+  else
+  {
+    inumber = inode_get_inumber(file_get_inode(pFile->file));
+  }
+  return inumber;
 }
 

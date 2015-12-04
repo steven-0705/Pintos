@@ -171,7 +171,9 @@ start_process (void *file_name_)
   int *return_ptr = (int*) if_.esp;
   *return_ptr = 0;
 
-  //hex_dump(0, PHYS_BASE - 100, 100, true);
+  if(!thread_current()->current_dir) {
+    thread_current()->current_dir = dir_open_root();
+  }
 
   /* If load failed, quit. */
   for(i = 0; i < MAX_ARGS && file_name[i]; i++) {
@@ -281,6 +283,10 @@ process_exit (void)
       list_remove(e);
       free(data);
       } 
+
+  if(thread_current()->current_dir) {
+    dir_close(thread_current()->current_dir);
+  }
 
   /* Signal the parent that the child has exited */
   struct thread *parent = thread_current()->parent;

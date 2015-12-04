@@ -124,6 +124,7 @@ struct thread
     /* Used for timer_sleep */
     int64_t ticks;
 
+    struct dir *current_dir;
   };
 
 struct child_data {

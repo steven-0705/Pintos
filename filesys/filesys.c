@@ -7,10 +7,14 @@
 #include "filesys/inode.h"
 #include "filesys/directory.h"
 #include "filesys/cache.h"
+#include "threads/thread.h"
+#include "threads/malloc.h"
 
 /* Partition that contains the file system. */
 struct block *fs_device;
 
+struct dir *get_containing_dir(const char *path);
+char *get_filename(const char *path);
 static void do_format (void);
 
 /* Initializes the file system module.
@@ -49,19 +53,22 @@ filesys_done (void)
    /*added isdir for later use with inodes
      get_filename is also new at the bottom*/
 bool
-filesys_create (const char *name, off_t initial_size, bool isdir) 
+filesys_create (const char *name, off_t initial_size, bool is_dir) 
 {
   block_sector_t inode_sector = 0;
-  struct dir *dir = dir_open_root ();
-  /*added*/
-  /*char* file_name = get_filename(name);*/
-  bool success = (dir != NULL
-                  && free_map_allocate (1, &inode_sector)
-                  && inode_create (inode_sector, initial_size)
-                  && dir_add (dir, name, inode_sector));
+  struct dir *dir = get_containing_dir(name);
+  char *file_name = get_filename(name);
+  bool success = false;
+  if(strcmp(file_name, ".") != 0 && strcmp(file_name, "..") != 0) {
+    success = (dir != NULL
+	       && free_map_allocate (1, &inode_sector)
+	       && inode_create (inode_sector, initial_size, is_dir)
+	       && dir_add (dir, file_name, inode_sector));
+  }
   if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
   dir_close (dir);
+  free(file_name);
 
   return success;
 }
@@ -74,13 +81,38 @@ filesys_create (const char *name, off_t initial_size, bool isdir)
 struct file *
 filesys_open (const char *name)
 {
-  struct dir *dir = dir_open_root ();
+  if(strlen(name) == 0) {
+    return NULL;
+  }
+  struct dir *dir = get_containing_dir(name);
+  char *file_name = get_filename(name);
   struct inode *inode = NULL;
 
-  if (dir != NULL)
-    dir_lookup (dir, name, &inode);
-  dir_close (dir);
+  if(dir != NULL) {
+    if(strcmp(file_name, "..") == 0) {
+      if(!dir_get_parent(dir, &inode)) {
+	free(file_name);
+	return NULL;
+      }
+    }
+    else if((dir_is_root(dir) && strlen(file_name) == 0) || strcmp(file_name, ".") == 0) {
+      free(file_name);
+      return (struct file *) dir;
+    }
+    else {
+      dir_lookup(dir, file_name, &inode);
+    }
+  }
 
+  dir_close (dir);
+  free(file_name);
+
+  if(!inode) {
+    return NULL;
+  }
+  if(inode_is_dir(inode)) {
+    return (struct file *) dir_open(inode);
+  }
   return file_open (inode);
 }
 
@@ -91,9 +123,11 @@ filesys_open (const char *name)
 bool
 filesys_remove (const char *name) 
 {
-  struct dir *dir = dir_open_root ();
-  bool success = dir != NULL && dir_remove (dir, name);
-  dir_close (dir); 
+  struct dir *dir = get_containing_dir(name);
+  char *file_name = get_filename(name);
+  bool success = dir != NULL && dir_remove (dir, file_name);
+  dir_close (dir);
+  free(file_name);
 
   return success;
 }
@@ -110,6 +144,82 @@ do_format (void)
   printf ("done.\n");
 }
 
+bool filesys_chdir(const char *name) {
+  struct dir *dir = get_containing_dir(name);
+  char *file_name = get_filename(name);
+  struct inode *inode = NULL;
+
+  if(dir != NULL) {
+    if(strcmp(file_name, "..") == 0) {
+      if(!dir_get_parent(dir, &inode) == 0) {
+	free(file_name);
+	return false;
+      }
+    }
+    else if((dir_is_root(dir) && strlen(file_name) ==0) || strcmp(file_name, ".") == 0) {
+      thread_current()->current_dir = dir;
+      free(file_name);
+      return true;
+    }
+    else {
+      dir_lookup(dir, file_name, &inode);
+    }
+  }
+  dir_close(dir);
+  free(file_name);
+  dir = dir_open(inode);
+  if(dir) {
+    dir_close(thread_current()->current_dir);
+    thread_current()->current_dir = dir;
+    return true;
+  }
+  return false;
+}
+
+struct dir *get_containing_dir(const char *path) {
+  struct dir *dir;
+  struct inode *inode;
+  char *token, *next_token,  *save_ptr;
+  char s[strlen(path) + 1];
+
+  memcpy(s, path, strlen(path) + 1);
+  token = strtok_r(s, "/", &save_ptr);
+  next_token = NULL;
+  if(s[0] == '/' || !thread_current()->current_dir) {
+    dir = dir_open_root();
+  }
+  else {
+    dir = dir_reopen(thread_current()->current_dir);
+  }
+  if(token) {
+    next_token = strtok_r(NULL, "/", &save_ptr);
+  }
+  while(next_token != NULL) {
+    if(strcmp(token, ".") != 0) {
+      if(strcmp(token, "..") == 0) {
+	if(!dir_get_parent(dir, &inode)) {
+	  return NULL;
+	}
+      }
+      else {
+	if(!dir_lookup(dir, token, &inode)) {
+	  return NULL;
+	}
+      }
+      if(inode_is_dir(inode)) {
+	dir_close(dir);
+	dir = dir_open(inode);
+      }
+      else {
+	inode_close(inode);
+      }
+    }
+    token = next_token;
+    next_token = strtok_r(NULL, "/", &save_ptr);
+  }
+  return dir;
+}
+
 char* get_filename(const char* path)
 {
   char s[strlen(path) +1];
@@ -119,7 +229,7 @@ char* get_filename(const char* path)
   for(token = strtok_r(s,"/", &save_ptr); token != NULL;
       token = strtok_r(NULL, "/",&save_ptr))
   {
-    prev_token;
+    prev_token = token;
   }
   char *file_name = malloc(strlen(prev_token)+1);
   memcpy(file_name,prev_token,strlen(prev_token)+1);

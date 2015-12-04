@@ -10,17 +10,16 @@ struct process_file {
   struct file *file;
   struct dir *dir;
   int fd;
-  bool isdir;
+  bool is_dir;
   struct list_elem elem;
 };
 
 void syscall_init (void);
 bool check_ptr_access(const void *ptr);
 int add_process_file (struct file* file);
-struct file* get_process_file(int fd);
+int add_process_dir(struct dir *dir);
+struct process_file* get_process_file(int fd);
 void close_process_file(int fd);
-void lock_filesys(void);
-void release_filesys(void);
 void halt(void);
 void exit(int status);
 pid_t exec(const char *cmd_line);
@@ -34,5 +33,10 @@ int write(int fd, const void *buffer, unsigned size);
 void seek(int fd, unsigned position);
 unsigned tell(int fd);
 void close(int fd);
+bool chdir (const char* dir);
+bool mkdir(const char* dir);
+bool readdir(int fd, char* name);
+bool isdir(int fd);
+int inumber(int fd);
 
 #endif /* userprog/syscall.h */
